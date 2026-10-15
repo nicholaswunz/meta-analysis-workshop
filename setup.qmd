@@ -67,15 +67,15 @@ The `brms` chunks are provided as an option for those who want a Bayesian workfl
 pacman::p_load(tidyverse, metafor, orchaRd, ape)
 
 # A tiny meta-analysis with a dataset that comes with metafor (dat.bcg)
-dat <- escalc(measure = "RR",     # log risk ratio
-              ai = tpos,          # vaccinated, tuberculosis positive
-              bi = tneg,          # vaccinated, tuberculosis negative
-              ci = cpos,          # control, tuberculosis positive
-              di = cneg,          # control, tuberculosis negative
-              data = dat.bcg)
+dat <- metafor::escalc(measure = "RR",     # log risk ratio
+                       ai = tpos,          # vaccinated, tuberculosis positive
+                       bi = tneg,          # vaccinated, tuberculosis negative
+                       ci = cpos,          # control, tuberculosis positive
+                       di = cneg,          # control, tuberculosis negative
+                       data = dat.bcg)
 
 # Random-effects meta-analysis
-rma(yi = yi, vi = vi, data = dat)
+metafor::rma(yi = yi, vi = vi, data = dat)
 ```
 
 If you see a 'Random-Effects Model (k = 13; tau^2 estimator: REML)' printout, you are ready.

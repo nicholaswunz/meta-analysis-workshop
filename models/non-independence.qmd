@@ -160,10 +160,10 @@ We can now calculate the log response ratio (*lnRR*) from the two treatments wit
 # Calculate the log response ratio (measure = "ROM")
 #   group 1 = fluctuating temperature treatment, group 2 = constant (control)
 #   escalc() adds two columns: yi (the effect size) and vi (its sampling variance)
-mass_data <- escalc(measure = "ROM",
-                    m1i = treat_mean,  sd1i = treat_error,  n1i = treat_N,
-                    m2i = control_mean, sd2i = control_error, n2i = control_N,
-                    data = mass_data)
+mass_data <- metafor::escalc(measure = "ROM",
+                             m1i = treat_mean,  sd1i = treat_error,  n1i = treat_N,
+                             m2i = control_mean, sd2i = control_error, n2i = control_N,
+                             data = mass_data)
 
 # Give every row (effect size) its own ID: 1, 2, ..., k.
 # make_VCV_matrix() uses it to label the rows and columns of the M matrix.
@@ -182,15 +182,15 @@ Once we have a column indicating which effects share a common control, we want t
 
 # Build the M matrix: sampling variances on the diagonal, and
 # covariances between effect sizes that share a control in the off-diagonals
-M <- make_VCV_matrix(data = mass_data,
-                     V = "vi",                    # column with the sampling variances
-                     cluster = "comparison_ID",   # rows with the same value share a control
-                     m = "control_mean",          # control group mean ...
-                     sd = "control_error",        # ... standard deviation ...
-                     n = "control_N",             # ... and sample size
-                     type = "vcv",                # return a (co)variance matrix
-                     vcal = "ROM",                # covariance formula for lnRR
-                     obs = "obs")                 # effect size ID
+M <- metaAidR::make_VCV_matrix(data = mass_data,
+                               V = "vi",                    # column with the sampling variances
+                               cluster = "comparison_ID",   # rows with the same value share a control
+                               m = "control_mean",          # control group mean ...
+                               sd = "control_error",        # ... standard deviation ...
+                               n = "control_N",             # ... and sample size
+                               type = "vcv",                # return a (co)variance matrix
+                               vcal = "ROM",                # covariance formula for lnRR
+                               obs = "obs")                 # effect size ID
 
 # Look at the top-left corner of the matrix
 round(M[1:6, 1:6], 4)
@@ -207,9 +207,9 @@ We can see the block structure from the shared controls in the data using `corrp
 # Convert the (co)variance matrix to a correlation matrix, then plot it
 M_cor <- cov2cor(M)
 
-corrplot(M_cor,
-         tl.cex = 0.6,    # size of the row and column labels
-         col = colorRampPalette(c("#1A2533", "white", "#e12744"))(200))   # workshop colours
+corrplot::corrplot(M_cor,
+                   tl.cex = 0.6,    # size of the row and column labels
+                   col = colorRampPalette(c("#1A2533", "white", "#e12744"))(200))   # workshop colours
 ```
 
 ### Including the $\textbf{M}$ matrix in our multilevel meta-analytic model
@@ -221,15 +221,15 @@ Now that we have constructed the $\textbf{M}$ matrix, we are ready to fit our mu
 #| echo: true
 
 # Multilevel model with the M matrix as the sampling (co)variance matrix
-mlma <- rma.mv(yi = yi,
-               V = M,                             # the full M matrix, not just vi
-               random = list(~ 1 | paper_no,      # among-study random effect
-                             ~ 1 | Genus_species, # among-species random effect
-                             ~ 1 | data_ID),      # within-study (effect size) random effect
-               method = "REML",
-               test = "t",
-               dfs = "contain",
-               data = mass_data)
+mlma <- metafor::rma.mv(yi = yi,
+                        V = M,                             # the full M matrix, not just vi
+                        random = list(~ 1 | paper_no,      # among-study random effect
+                                      ~ 1 | Genus_species, # among-species random effect
+                                      ~ 1 | data_ID),      # within-study (effect size) random effect
+                        method = "REML",
+                        test = "t",
+                        dfs = "contain",
+                        data = mass_data)
 
 summary(mlma)
 ```
@@ -316,21 +316,21 @@ zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-worksho
 
 # Remove a column we don't need
 zr_data <- zr_data %>%
-  select(-dispersal_def)
+  dplyr::select(-dispersal_def)
 
 # Give every effect size (row) its own ID
 zr_data$es_ID <- 1:nrow(zr_data)
 
 # Make the OTL species names consistent: replace any underscores with spaces
 # (a few names were entered with an underscore when the database was curated)
-zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, "_", " ")
+zr_data$species_OTL <- stringr::str_replace_all(zr_data$species_OTL, "_", " ")
 
 # Calculate Zr and its sampling variance
-zr_data <- escalc(measure = "ZCOR",
-                  ri = corr_coeff,
-                  ni = sample_size,
-                  data = zr_data,
-                  var.names = c("Zr", "V_Zr"))
+zr_data <- metafor::escalc(measure = "ZCOR",
+                           ri = corr_coeff,
+                           ni = sample_size,
+                           data = zr_data,
+                           var.names = c("Zr", "V_Zr"))
 ```
 
 ### Phylogenetic reconstruction
@@ -366,7 +366,7 @@ For the purpose of this tutorial, we will follow the second method. Notice that 
 
 # 1. Match our species names to the Open Tree of Life (OTL) database
 species <- sort(unique(zr_data$species_OTL))   # list of unique species names
-taxa <- tnrs_match_names(names = species)      # look up each name in the OTL
+taxa <- rotl::tnrs_match_names(names = species)      # look up each name in the OTL
 
 # Check for names that only matched approximately (should be none)
 taxa[taxa$approximate_match == TRUE, ]
@@ -376,11 +376,11 @@ length(species)
 nrow(taxa)
 
 # 2. Download the part of the OTL tree that contains our species
-tree <- tol_induced_subtree(ott_ids = ott_id(taxa), label_format = "name")
+tree <- rotl::tol_induced_subtree(ott_ids = rotl::ott_id(taxa), label_format = "name")
 
 # 3. Check that the tree tip labels match the species names in the data
 #    (tree tip labels use underscores, so add them to our names first)
-species_list <- str_replace_all(species, " ", "_")
+species_list <- stringr::str_replace_all(species, " ", "_")
 setdiff(tree$tip.label, species_list)   # names in the tree but not in the data (should be none)
 
 # You can also plot the tree to check that the species are correct:
@@ -388,18 +388,18 @@ setdiff(tree$tip.label, species_list)   # names in the tree but not in the data 
 
 # 4. Prepare the tree for analysis
 set.seed(1)
-tree <- compute.brlen(tree, method = "Grafen", power = 1)   # add branch lengths
-tree <- multi2di(tree, random = TRUE)                       # randomly resolve polytomies
+tree <- ape::compute.brlen(tree, method = "Grafen", power = 1)   # add branch lengths
+tree <- ape::multi2di(tree, random = TRUE)                       # randomly resolve polytomies
 
 # Note: a polytomy is an internal node with three or more descendant branches.
 # Trees from the OTL often have polytomies because of a lack of phylogenetic
 # information. multi2di() resolves them at random into a fully bifurcating tree.
 
 # Check the tree is ultrametric (all tips equally distant from the root)
-is.ultrametric(tree)
+ape::is.ultrametric(tree)
 
 # 5. Create the phylogenetic correlation matrix (A) for the analysis
-phylo_cor <- vcv(tree, corr = TRUE)
+phylo_cor <- ape::vcv(tree, corr = TRUE)
 ```
 
 We can also have a look at the final tree:
@@ -424,21 +424,21 @@ Note: remember to add underscores to the OTL species names, because the tree tip
 #| label: analysis
 
 # Add underscores to the OTL species names so they match the tree
-zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, " ", "_")
+zr_data$species_OTL <- stringr::str_replace_all(zr_data$species_OTL, " ", "_")
 
 # Phylogenetic multilevel meta-analysis
-overall_model <- rma.mv(yi = Zr,
-                        V = V_Zr,
-                        mod = ~ 1,                         # intercept only: the overall mean
-                        random = list(~ 1 | study_ID,      # among studies
-                                      ~ 1 | es_ID,         # within studies (residual)
-                                      ~ 1 | species,       # among species (non-phylogenetic)
-                                      ~ 1 | species_OTL),  # phylogeny
-                        R = list(species_OTL = phylo_cor), # correlation matrix for species_OTL
-                        method = "REML",
-                        test = "t",
-                        dfs = "contain",
-                        data = zr_data)
+overall_model <- metafor::rma.mv(yi = Zr,
+                                 V = V_Zr,
+                                 mod = ~ 1,                         # intercept only: the overall mean
+                                 random = list(~ 1 | study_ID,      # among studies
+                                               ~ 1 | es_ID,         # within studies (residual)
+                                               ~ 1 | species,       # among species (non-phylogenetic)
+                                               ~ 1 | species_OTL),  # phylogeny
+                                 R = list(species_OTL = phylo_cor), # correlation matrix for species_OTL
+                                 method = "REML",
+                                 test = "t",
+                                 dfs = "contain",
+                                 data = zr_data)
 
 summary(overall_model)
 ```
@@ -476,7 +476,7 @@ H2_phylo <- s2[["phylo"]] / (s2[["phylo"]] + s2[["species"]])
 round(H2_phylo, 2)
 
 # I2 for each random effect
-round(i2_ml(overall_model), 1)
+round(orchaRd::i2_ml(overall_model), 1)
 ```
 
 **Interpretation.**
@@ -485,7 +485,7 @@ round(i2_ml(overall_model), 1)
 #| label: interp-values
 #| include: false
 # Values used in the text below
-i2_overall   <- i2_ml(overall_model)                   # I2: total and per random effect
+i2_overall   <- orchaRd::i2_ml(overall_model)                   # I2: total and per random effect
 pred_overall <- predict(overall_model, transf = tanh)  # mean, 95% CI and 95% PI back-transformed to r
 n_species    <- length(unique(zr_data$species_OTL))    # number of species
 n_studies    <- length(unique(zr_data$study_ID))       # number of studies
@@ -503,11 +503,11 @@ n_studies    <- length(unique(zr_data$study_ID))       # number of studies
 #| fig-cap: "Orchard plot of the phylogenetic multilevel model (Zr)."
 #| fig-height: 3.4
 
-orchard_plot(overall_model,
-             mod = "1",              # overall mean
-             group = "study_ID",     # count the number of studies
-             xlab = "Fisher's Zr",
-             cb = FALSE)             # use the workshop's red colours
+orchaRd::orchard_plot(overall_model,
+                      mod = "1",              # overall mean
+                      group = "study_ID",     # count the number of studies
+                      xlab = "Fisher's Zr",
+                      cb = FALSE)             # use the workshop's red colours
 ```
 
 ::: 

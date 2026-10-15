@@ -2,13 +2,13 @@
 # Sourced at the top of every page so that all figures look the same.
 
 # 1. A clean ggplot theme --------------------------------------------------
-theme_set(
-  theme_classic(base_size = 13) +
-    theme(
-      plot.title       = element_text(face = "bold", size = 13),
-      plot.subtitle    = element_text(colour = "grey35", size = 11),
-      strip.background = element_rect(fill = "#EEECEA", colour = NA),
-      strip.text       = element_text(face = "bold"),
+ggplot2::theme_set(
+  ggplot2::theme_classic(base_size = 13) +
+    ggplot2::theme(
+      plot.title       = ggplot2::element_text(face = "bold", size = 13),
+      plot.subtitle    = ggplot2::element_text(colour = "grey35", size = 11),
+      strip.background = ggplot2::element_rect(fill = "#EEECEA", colour = NA),
+      strip.text       = ggplot2::element_text(face = "bold"),
       legend.position  = "bottom"
     )
 )
@@ -37,8 +37,8 @@ options(
 )
 
 # Default fill for bars and histograms when no colour is given
-update_geom_defaults("bar", list(fill = "#e12744"))
-update_geom_defaults("col", list(fill = "#e12744"))
+ggplot2::update_geom_defaults("bar", list(fill = "#e12744"))
+ggplot2::update_geom_defaults("col", list(fill = "#e12744"))
 
 options(digits = 3, pillar.sigfig = 3)
 

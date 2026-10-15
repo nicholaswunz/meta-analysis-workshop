@@ -60,37 +60,37 @@ We now have an additional source of variation, $s_{i}$, which is the study-speci
 set.seed(7)
 k <- 8
 
-illus <- tibble(study = 1:k,
-                vi = runif(k, 0.005, 0.03)) %>%                 # sampling variances
-  mutate(theta_re = 0.3 + rnorm(k, mean = 0, sd = 0.15),       # each study's true effect
-         y_fe = 0.3 + rnorm(k, mean = 0, sd = sqrt(vi)),        # observed: fixed effect
-         y_re = theta_re + rnorm(k, mean = 0, sd = sqrt(vi)),   # observed: random effects
-         y_fe_lb = y_fe - 1.96 * sqrt(vi), y_fe_ub = y_fe + 1.96 * sqrt(vi),
-         y_re_lb = y_re - 1.96 * sqrt(vi), y_re_ub = y_re + 1.96 * sqrt(vi))
+illus <- tibble::tibble(study = 1:k,
+                        vi = runif(k, 0.005, 0.03)) %>%                 # sampling variances
+  dplyr::mutate(theta_re = 0.3 + rnorm(k, mean = 0, sd = 0.15),       # each study's true effect
+                y_fe = 0.3 + rnorm(k, mean = 0, sd = sqrt(vi)),        # observed: fixed effect
+                y_re = theta_re + rnorm(k, mean = 0, sd = sqrt(vi)),   # observed: random effects
+                y_fe_lb = y_fe - 1.96 * sqrt(vi), y_fe_ub = y_fe + 1.96 * sqrt(vi),
+                y_re_lb = y_re - 1.96 * sqrt(vi), y_re_ub = y_re + 1.96 * sqrt(vi))
 
 # The distribution of true effects (mean 0.3, SD 0.15), scaled to fit the plot
-dist_curve <- tibble(x = seq(-0.2, 0.9, by = 0.005)) %>%
-  mutate(d = dnorm(x, mean = 0.3, sd = 0.15),
-         height = d / max(d) * 3 + 0.4)
+dist_curve <- tibble::tibble(x = seq(-0.2, 0.9, by = 0.005)) %>%
+  dplyr::mutate(d = dnorm(x, mean = 0.3, sd = 0.15),
+                height = d / max(d) * 3 + 0.4)
 
-p_fe <- ggplot(illus, aes(y = study)) +
-  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
-  geom_errorbar(aes(xmin = y_fe_lb, xmax = y_fe_ub), width = 0, orientation = "y", colour = "grey50") +
-  geom_point(aes(x = y_fe), size = 2.5, colour = pal["red"]) +
-  scale_y_continuous(breaks = 1:k) +
-  coord_cartesian(xlim = c(-0.2, 0.9)) +
-  labs(x = "Effect size", y = "Study", title = "Fixed effect")
+p_fe <- ggplot2::ggplot(illus, ggplot2::aes(y = study)) +
+  ggplot2::geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = y_fe_lb, xmax = y_fe_ub), width = 0, orientation = "y", colour = "grey50") +
+  ggplot2::geom_point(ggplot2::aes(x = y_fe), size = 2.5, colour = pal["red"]) +
+  ggplot2::scale_y_continuous(breaks = 1:k) +
+  ggplot2::coord_cartesian(xlim = c(-0.2, 0.9)) +
+  ggplot2::labs(x = "Effect size", y = "Study", title = "Fixed effect")
 
-p_re <- ggplot(illus, aes(y = study)) +
-  geom_area(data = dist_curve, aes(x = x, y = height),
-            fill = pal["light"], alpha = 0.6) +
-  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
-  geom_errorbar(aes(xmin = y_re_lb, xmax = y_re_ub), width = 0, orientation = "y", colour = "grey50") +
-  geom_point(aes(x = theta_re), shape = 1, size = 3, colour = pal["dark"]) +
-  geom_point(aes(x = y_re), size = 2.5, colour = pal["red"]) +
-  scale_y_continuous(breaks = 1:k) +
-  coord_cartesian(xlim = c(-0.2, 0.9)) +
-  labs(x = "Effect size", y = NULL, title = "Random effects")
+p_re <- ggplot2::ggplot(illus, ggplot2::aes(y = study)) +
+  ggplot2::geom_area(data = dist_curve, ggplot2::aes(x = x, y = height),
+                     fill = pal["light"], alpha = 0.6) +
+  ggplot2::geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = y_re_lb, xmax = y_re_ub), width = 0, orientation = "y", colour = "grey50") +
+  ggplot2::geom_point(ggplot2::aes(x = theta_re), shape = 1, size = 3, colour = pal["dark"]) +
+  ggplot2::geom_point(ggplot2::aes(x = y_re), size = 2.5, colour = pal["red"]) +
+  ggplot2::scale_y_continuous(breaks = 1:k) +
+  ggplot2::coord_cartesian(xlim = c(-0.2, 0.9)) +
+  ggplot2::labs(x = "Effect size", y = NULL, title = "Random effects")
 
 p_fe + p_re
 ```
@@ -112,18 +112,18 @@ wu_met <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop
 
 # Keep the columns we need, and only the effect sizes for metabolic traits
 wu_met <- wu_met %>%
-  select(study_ID, taxa, species, trait, response, response_unit,
-         disp_trait, disp_unit, corr_coeff, sample_size) %>%
-  filter(trait == "Metabolism")
+  dplyr::select(study_ID, taxa, species, trait, response, response_unit,
+                disp_trait, disp_unit, corr_coeff, sample_size) %>%
+  dplyr::filter(trait == "Metabolism")
 
 # Give every effect size (row) its own ID; we need this later for rma.mv()
 wu_met$es_ID <- 1:nrow(wu_met)
 
 # Calculate Zr (yi) and its sampling variance (vi)
-wu_met <- escalc(measure = "ZCOR",
-                 ri = corr_coeff,
-                 ni = sample_size,
-                 data = wu_met)
+wu_met <- metafor::escalc(measure = "ZCOR",
+                          ri = corr_coeff,
+                          ni = sample_size,
+                          data = wu_met)
 
 # How many effect sizes, studies and species do we have?
 nrow(wu_met)                      # number of effect sizes
@@ -137,10 +137,10 @@ First, we fit a fixed-effect model with the `rma()` function by setting `method 
 #| label: rma-fe
 
 # Fixed-effect model
-mod_fe <- rma(yi = yi,          # effect sizes
-              vi = vi,          # sampling variances
-              method = "EE",    # fixed-effect ('equal effects') model
-              data = wu_met)
+mod_fe <- metafor::rma(yi = yi,          # effect sizes
+                       vi = vi,          # sampling variances
+                       method = "EE",    # fixed-effect ('equal effects') model
+                       data = wu_met)
 
 summary(mod_fe)
 ```
@@ -151,11 +151,11 @@ Now we fit a random-effects model. The only change is the `method` argument, whi
 #| label: rma-re
 
 # Random-effects model
-mod_re <- rma(yi = yi,          # effect sizes
-              vi = vi,          # sampling variances
-              method = "REML",  # restricted maximum likelihood estimate of tau^2
-              test = "t",       # t-distribution rather than z for tests and CIs (more conservative)
-              data = wu_met)
+mod_re <- metafor::rma(yi = yi,          # effect sizes
+                       vi = vi,          # sampling variances
+                       method = "REML",  # restricted maximum likelihood estimate of tau^2
+                       test = "t",       # t-distribution rather than z for tests and CIs (more conservative)
+                       data = wu_met)
 
 summary(mod_re)
 ```
@@ -227,7 +227,7 @@ You'll notice that the notation changes slightly – $y_{i,j}$ is now the *i*th 
 #| fig-width: 8
 
 # The boxes (nodes) in the diagram
-nodes <- tibble(
+nodes <- tibble::tibble(
   label = c("Overall mean μ", "Study 1", "Study 2", "Study 3",
             "es 1", "es 2", "es 3", "es 4", "es 5", "es 6"),
   x     = c(3.5, 1.5, 3.5, 5.5, 1, 2, 3, 4, 5, 6),
@@ -236,29 +236,29 @@ nodes <- tibble(
 )
 
 # The lines (edges) joining the boxes
-edges <- tibble(x    = c(3.5, 3.5, 3.5, 1.5, 1.5, 3.5, 3.5, 5.5, 5.5),
-                y    = c(3,   3,   3,   2,   2,   2,   2,   2,   2),
-                xend = c(1.5, 3.5, 5.5, 1,   2,   3,   4,   5,   6),
-                yend = c(2,   2,   2,   1,   1,   1,   1,   1,   1))
+edges <- tibble::tibble(x    = c(3.5, 3.5, 3.5, 1.5, 1.5, 3.5, 3.5, 5.5, 5.5),
+                        y    = c(3,   3,   3,   2,   2,   2,   2,   2,   2),
+                        xend = c(1.5, 3.5, 5.5, 1,   2,   3,   4,   5,   6),
+                        yend = c(2,   2,   2,   1,   1,   1,   1,   1,   1))
 
 # Text on the right-hand side
-level_text <- tibble(x = 7,
-                     y = c(3, 2, 1),
-                     label = c("Overall mean (μ)",
-                               "Level 3: studies (τ²)",
-                               "Level 2: effect sizes (σ²e)\nLevel 1: sampling error (known v)"))
+level_text <- tibble::tibble(x = 7,
+                             y = c(3, 2, 1),
+                             label = c("Overall mean (μ)",
+                                       "Level 3: studies (τ²)",
+                                       "Level 2: effect sizes (σ²e)\nLevel 1: sampling error (known v)"))
 
-ggplot() +
-  geom_segment(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
-               colour = "grey60") +
-  geom_label(data = nodes, aes(x = x, y = y, label = label, fill = level),
-             colour = "white", fontface = "bold", size = 3.3) +
-  geom_text(data = level_text, aes(x = x, y = y, label = label),
-            hjust = 0, size = 3.4, colour = "grey30") +
-  scale_fill_manual(values = c(mean = pal[["dark"]], study = pal[["darkred"]], es = pal[["red"]]),
-                    guide = "none") +
-  coord_cartesian(xlim = c(0.5, 9.5), ylim = c(0.6, 3.2), clip = "off") +
-  theme_void()
+ggplot2::ggplot() +
+  ggplot2::geom_segment(data = edges, ggplot2::aes(x = x, y = y, xend = xend, yend = yend),
+                        colour = "grey60") +
+  ggplot2::geom_label(data = nodes, ggplot2::aes(x = x, y = y, label = label, fill = level),
+                      colour = "white", fontface = "bold", size = 3.3) +
+  ggplot2::geom_text(data = level_text, ggplot2::aes(x = x, y = y, label = label),
+                     hjust = 0, size = 3.4, colour = "grey30") +
+  ggplot2::scale_fill_manual(values = c(mean = pal[["dark"]], study = pal[["darkred"]], es = pal[["red"]]),
+                             guide = "none") +
+  ggplot2::coord_cartesian(xlim = c(0.5, 9.5), ylim = c(0.6, 3.2), clip = "off") +
+  ggplot2::theme_void()
 ```
 
 ## Building more complex multilevel meta-analytic models
@@ -303,14 +303,14 @@ Here, we include `study_ID` and `es_ID` as random effects to account for between
 #| label: rma-mv
 
 # Multilevel meta-analytic model
-mod_ml <- rma.mv(yi = yi,                         # effect sizes
-                 V = vi,                          # sampling variances (or a full matrix)
-                 random = list(~ 1 | study_ID,    # between-study random effect
-                               ~ 1 | es_ID),      # within-study (effect size) random effect
-                 method = "REML",
-                 test = "t",                      # t-tests ...
-                 dfs = "contain",                 # ... with 'containment' degrees of freedom
-                 data = wu_met)
+mod_ml <- metafor::rma.mv(yi = yi,                         # effect sizes
+                          V = vi,                          # sampling variances (or a full matrix)
+                          random = list(~ 1 | study_ID,    # between-study random effect
+                                        ~ 1 | es_ID),      # within-study (effect size) random effect
+                          method = "REML",
+                          test = "t",                      # t-tests ...
+                          dfs = "contain",                 # ... with 'containment' degrees of freedom
+                          data = wu_met)
 
 summary(mod_ml)
 ```
@@ -361,9 +361,9 @@ As a safeguard against a mis-specified random-effects or sampling covariance str
 #| label: robust
 
 # Cluster-robust standard errors, with study as the cluster
-robust(mod_ml,
-       cluster = wu_met$study_ID,
-       clubSandwich = TRUE)   # small-sample correction
+metafor::robust(mod_ml,
+                cluster = wu_met$study_ID,
+                clubSandwich = TRUE)   # small-sample correction
 ```
 :::
 
@@ -429,7 +429,7 @@ asr_dat <- cbind(asr_dat, arr_es)
 
 # Keep only the effect sizes for females
 asr_dat <- asr_dat %>%
-  filter(sex == "female")
+  dplyr::filter(sex == "female")
 ```
 
 ### Fitting a multilevel meta-analytic model in `metafor`
@@ -446,15 +446,15 @@ You will notice two additional arguments:
 #| label: arr-mlma
 
 # Multilevel meta-analytic model
-MLMA <- rma.mv(yi = ARR,                       # effect sizes
-               V = V_ARR,                      # sampling variances
-               method = "REML",
-               random = list(~ 1 | species_ID, # among-species random effect
-                             ~ 1 | study_ID,   # among-study random effect
-                             ~ 1 | es_ID),     # within-study (effect size) random effect
-               dfs = "contain",
-               test = "t",
-               data = asr_dat)
+MLMA <- metafor::rma.mv(yi = ARR,                       # effect sizes
+                        V = V_ARR,                      # sampling variances
+                        method = "REML",
+                        random = list(~ 1 | species_ID, # among-species random effect
+                                      ~ 1 | study_ID,   # among-study random effect
+                                      ~ 1 | es_ID),     # within-study (effect size) random effect
+                        dfs = "contain",
+                        test = "t",
+                        data = asr_dat)
 
 summary(MLMA)
 ```
@@ -496,14 +496,14 @@ summary(MLMA)
 #| label: self-learning-answers
 
 # 1. Refit the multilevel model with ML
-mod_ml_ML <- rma.mv(yi = yi,
-                    V = vi,
-                    random = list(~ 1 | study_ID,
-                                  ~ 1 | es_ID),
-                    method = "ML",
-                    test = "t",
-                    dfs = "contain",
-                    data = wu_met)
+mod_ml_ML <- metafor::rma.mv(yi = yi,
+                             V = vi,
+                             random = list(~ 1 | study_ID,
+                                           ~ 1 | es_ID),
+                             method = "ML",
+                             test = "t",
+                             dfs = "contain",
+                             data = wu_met)
 
 # Compare the overall means and variance components from REML and ML
 mod_ml$b[1]
@@ -512,21 +512,21 @@ mod_ml$sigma2
 mod_ml_ML$sigma2
 
 # 2. Add species as a third random effect
-mod_ml_sp <- rma.mv(yi = yi,
-                    V = vi,
-                    random = list(~ 1 | species,
-                                  ~ 1 | study_ID,
-                                  ~ 1 | es_ID),
-                    test = "t",
-                    dfs = "contain",
-                    data = wu_met)
+mod_ml_sp <- metafor::rma.mv(yi = yi,
+                             V = vi,
+                             random = list(~ 1 | species,
+                                           ~ 1 | study_ID,
+                                           ~ 1 | es_ID),
+                             test = "t",
+                             dfs = "contain",
+                             data = wu_met)
 
 # Variance components: species, study, effect size
 round(mod_ml_sp$sigma2, 4)
 
 # 3. Find the study that contributed the most effect sizes
 study_counts <- wu_met %>%
-  count(study_ID, sort = TRUE)   # number of rows per study, largest first
+  dplyr::count(study_ID, sort = TRUE)   # number of rows per study, largest first
 
 top_study <- study_counts$study_ID[1]
 top_study

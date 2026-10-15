@@ -66,12 +66,12 @@ The relationship between $r$ and $Zr$ can be seen in @fig-zr:
 #| fig-cap: "Left: Fisher's transformation is nearly linear for small $r$ but stretches values near ±1. Right: sampling distributions of $r$ and $Zr$ from 5,000 simulated samples of n = 15 when the true correlation is 0.8. $r$ is skewed; $Zr$ is approximately normal."
 #| fig-height: 3
 # Left panel: Zr plotted against r
-p1 <- tibble(r = seq(-0.99, 0.99, by = 0.01)) %>%
-  mutate(Zr = atanh(r)) %>%          # atanh() is Fisher's z-transformation
-  ggplot(aes(x = r, y = Zr)) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
-  geom_line(linewidth = 1.1, colour = pal["red"]) +
-  labs(title = "r vs Zr")
+p1 <- tibble::tibble(r = seq(-0.99, 0.99, by = 0.01)) %>%
+  dplyr::mutate(Zr = atanh(r)) %>%          # atanh() is Fisher's z-transformation
+  ggplot2::ggplot(ggplot2::aes(x = r, y = Zr)) +
+  ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+  ggplot2::geom_line(linewidth = 1.1, colour = pal["red"]) +
+  ggplot2::labs(title = "r vs Zr")
 
 # Right panel: simulate 5,000 studies of n = 15 with a true correlation of 0.8
 set.seed(1)
@@ -82,16 +82,16 @@ sim_r <- replicate(5000, {
   cor(x[, 1], x[, 2])
 })
 
-sims <- tibble(r = sim_r, Zr = atanh(sim_r)) %>%
-  pivot_longer(cols = c(r, Zr), names_to = "scale", values_to = "value")
+sims <- tibble::tibble(r = sim_r, Zr = atanh(sim_r)) %>%
+  tidyr::pivot_longer(cols = c(r, Zr), names_to = "scale", values_to = "value")
 
-p2 <- ggplot(sims, aes(x = value, fill = scale)) +
-  geom_histogram(bins = 40, alpha = 0.85) +
-  facet_wrap(~ scale, scales = "free_x") +
-  scale_fill_manual(values = c(r = pal[["dark"]], Zr = pal[["red"]]), guide = "none") +
-  labs(x = NULL, y = "Count", title = "Sampling distributions (true r = 0.8, n = 15)")
+p2 <- ggplot2::ggplot(sims, ggplot2::aes(x = value, fill = scale)) +
+  ggplot2::geom_histogram(bins = 40, alpha = 0.85) +
+  ggplot2::facet_wrap(~ scale, scales = "free_x") +
+  ggplot2::scale_fill_manual(values = c(r = pal[["dark"]], Zr = pal[["red"]]), guide = "none") +
+  ggplot2::labs(x = NULL, y = "Count", title = "Sampling distributions (true r = 0.8, n = 15)")
 
-p1 + p2 + plot_layout(widths = c(1, 2))
+p1 + p2 + patchwork::plot_layout(widths = c(1, 2))
 ```
 
 ### Example calculation of Zr
@@ -115,19 +115,19 @@ zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-worksho
 
 # Keep only the columns we need, and only the first 10 rows
 zr_data <- zr_data %>%
-  select(study_ID, taxa, species, trait, response, response_unit,
-         disp_trait, disp_unit, corr_coeff, sample_size) %>%
+  dplyr::select(study_ID, taxa, species, trait, response, response_unit,
+                disp_trait, disp_unit, corr_coeff, sample_size) %>%
   dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
 
 # Calculate Fisher's z-transformed correlation (measure = "ZCOR")
 #   ri = the correlation coefficient in each row
 #   ni = the sample size in each row
 #   var.names = names for the new effect size and sampling variance columns
-zr_data <- escalc(measure = "ZCOR",
-                  ri = corr_coeff,
-                  ni = sample_size,
-                  data = zr_data,
-                  var.names = c("Zr", "V_Zr"))
+zr_data <- metafor::escalc(measure = "ZCOR",
+                           ri = corr_coeff,
+                           ni = sample_size,
+                           data = zr_data,
+                           var.names = c("Zr", "V_Zr"))
 
 zr_data
 ```
@@ -143,7 +143,7 @@ zr_data$r <- tanh(zr_data$Zr)
 
 # The back-transformed r matches the original correlation coefficients
 zr_data %>%
-  select(corr_coeff, r)
+  dplyr::select(corr_coeff, r)
 ```
 
 The correlation coefficient itself is a unitless measure that captures both the strength and direction of the relationship between two variables. The raw correlation coefficient ranges from −1 to 1. A positive correlation indicates that, as the value of one variable increases, so too does the value of the second variable. The magnitude of the value indicates how strongly they co-vary. For example, a correlation of 1 indicates that variable 1 perfectly co-varies with variable 2.
@@ -183,25 +183,25 @@ SMD expresses the difference in **standard-deviation units**, where $SD_{p}$ is 
 #| fig-height: 3.6
 # Two scenarios with the same means (control = 10, treatment = 12)
 # but different coefficients of variation (CV = SD / mean)
-dens <- expand_grid(cv = c(0.1, 0.3),
-                    x  = seq(0, 25, by = 0.05)) %>%
-  mutate(Control   = dnorm(x, mean = 10, sd = 10 * cv),
-         Treatment = dnorm(x, mean = 12, sd = 12 * cv)) %>%
-  pivot_longer(cols = c(Control, Treatment),
-               names_to = "group", values_to = "density")
+dens <- tidyr::expand_grid(cv = c(0.1, 0.3),
+                           x  = seq(0, 25, by = 0.05)) %>%
+  dplyr::mutate(Control   = dnorm(x, mean = 10, sd = 10 * cv),
+                Treatment = dnorm(x, mean = 12, sd = 12 * cv)) %>%
+  tidyr::pivot_longer(cols = c(Control, Treatment),
+                      names_to = "group", values_to = "density")
 
 # Panel labels with the SMD for each scenario
 dens <- dens %>%
-  mutate(panel = ifelse(cv == 0.1,
-                        "Low variability: SMD ≈ 1.8",
-                        "High variability: SMD ≈ 0.6"))
+  dplyr::mutate(panel = ifelse(cv == 0.1,
+                               "Low variability: SMD ≈ 1.8",
+                               "High variability: SMD ≈ 0.6"))
 
-ggplot(dens, aes(x = x, y = density, fill = group)) +
-  geom_area(alpha = 0.6, position = "identity", colour = "grey30", linewidth = 0.3) +
-  facet_wrap(~ panel, scales = "free_y") +
-  scale_fill_manual(values = c(Control = pal[["dark"]], Treatment = pal[["red"]]), name = NULL) +
-  labs(x = "Metabolic rate (mL O2 / h)", y = NULL,
-       subtitle = "Treatment mean = 12, control mean = 10 in both panels: lnRR = ln(12/10) = 0.18")
+ggplot2::ggplot(dens, ggplot2::aes(x = x, y = density, fill = group)) +
+  ggplot2::geom_area(alpha = 0.6, position = "identity", colour = "grey30", linewidth = 0.3) +
+  ggplot2::facet_wrap(~ panel, scales = "free_y") +
+  ggplot2::scale_fill_manual(values = c(Control = pal[["dark"]], Treatment = pal[["red"]]), name = NULL) +
+  ggplot2::labs(x = "Metabolic rate (mL O2 / h)", y = NULL,
+                subtitle = "Treatment mean = 12, control mean = 10 in both panels: lnRR = ln(12/10) = 0.18")
 ```
 
 
@@ -226,17 +226,17 @@ ratio_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-work
 
 # Keep only the columns we need, and only the first 10 rows
 ratio_data <- ratio_data %>%
-  select(study_ID, taxa, species, trait, response, response_unit,
-         mean_core, sd_core, n_core, mean_front, sd_front, n_front) %>%
+  dplyr::select(study_ID, taxa, species, trait, response, response_unit,
+                mean_core, sd_core, n_core, mean_front, sd_front, n_front) %>%
   dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
 
 # Calculate the log response ratio (measure = "ROM", the 'ratio of means')
 #   group 1 (numerator)   = edge (front) population
 #   group 2 (denominator) = core population
-ratio_data <- escalc(measure = "ROM",
-                     m1i = mean_front, sd1i = sd_front, n1i = n_front,
-                     m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
-                     data = ratio_data)
+ratio_data <- metafor::escalc(measure = "ROM",
+                              m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                              m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+                              data = ratio_data)
 
 ratio_data
 ```
@@ -312,15 +312,15 @@ We could also use @WuSeebacher2022's data to calculate Hedges' *g*. Hedges' *g* 
 # Calculate Hedges' g (measure = "SMD")
 #   group 1 = edge (front) population, group 2 = core population
 #   var.names = names for the new effect size and sampling variance columns
-hedge_data <- escalc(measure = "SMD",
-                     m1i = mean_front, sd1i = sd_front, n1i = n_front,
-                     m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
-                     data = ratio_data,
-                     var.names = c("d", "d_vi"))
+hedge_data <- metafor::escalc(measure = "SMD",
+                              m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                              m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+                              data = ratio_data,
+                              var.names = c("d", "d_vi"))
 
 # Show the two new columns
 hedge_data %>%
-  select(species, mean_front, mean_core, d, d_vi)
+  dplyr::select(species, mean_front, mean_core, d, d_vi)
 ```
 
 Visualising and interpreting Hedges' *g* can be slightly less intuitive than log response ratios. There's a great [online resource](https://rpsychologist.com/cohend/) by Kristoffer Magnusson with some visuals that can help you decipher the meaning of Cohen's *d*, which is interpreted in the same way as Hedges' *g*. 
@@ -347,7 +347,7 @@ There are three ways you can calculate an effect size from this arrangement:
 ```{r}
 #| label: binary
 # Embryo mortality at a high (34 °C) vs control (28 °C) incubation temperature
-embryo <- tribble(
+embryo <- tibble::tribble(
   ~study, ~species,               ~dead_hot, ~alive_hot, ~dead_ctrl, ~alive_ctrl,
   "A",    "Chelonia mydas",              18,         32,          6,          44,
   "B",    "Lampropholis delicata",        9,         21,          4,          26,
@@ -357,25 +357,25 @@ embryo <- tribble(
 # Log odds ratio (measure = "OR")
 #   ai, bi = events and non-events in the treatment (hot) group
 #   ci, di = events and non-events in the control group
-embryo_es <- escalc(measure = "OR",
-                    ai = dead_hot,  bi = alive_hot,
-                    ci = dead_ctrl, di = alive_ctrl,
-                    data = embryo,
-                    var.names = c("lnOR", "v_lnOR"))
+embryo_es <- metafor::escalc(measure = "OR",
+                             ai = dead_hot,  bi = alive_hot,
+                             ci = dead_ctrl, di = alive_ctrl,
+                             data = embryo,
+                             var.names = c("lnOR", "v_lnOR"))
 
 # Log risk ratio (measure = "RR"), added to the same data frame
-embryo_es <- escalc(measure = "RR",
-                    ai = dead_hot,  bi = alive_hot,
-                    ci = dead_ctrl, di = alive_ctrl,
-                    data = embryo_es,
-                    var.names = c("lnRiskR", "v_lnRiskR"))
+embryo_es <- metafor::escalc(measure = "RR",
+                             ai = dead_hot,  bi = alive_hot,
+                             ci = dead_ctrl, di = alive_ctrl,
+                             data = embryo_es,
+                             var.names = c("lnRiskR", "v_lnRiskR"))
 
 # Back-transform with exp() so the ratios are easier to interpret
 embryo_es$OR         <- exp(embryo_es$lnOR)
 embryo_es$risk_ratio <- exp(embryo_es$lnRiskR)
 
 embryo_es %>%
-  select(study, lnOR, v_lnOR, OR, lnRiskR, risk_ratio)
+  dplyr::select(study, lnOR, v_lnOR, OR, lnRiskR, risk_ratio)
 ```
 
 **Interpretation.** In study A, embryos at 34 °C had `r round(exp(embryo_es$lnOR[1]), 1)` times the odds, and `r round(exp(embryo_es$lnRiskR[1]), 1)` times the risk, of dying compared with controls. 
@@ -435,34 +435,34 @@ In other words, $lnRR_{Q_{10}}$ is simply lnRR rescaled to a 10 °C difference, 
 #| fig-cap: "Two hypothetical studies of the same species (Q10 = 2) measured metabolic rate at different temperature differences. Their lnRRs differ three-fold, but their $lnRR_{Q_{10}}$ values are identical."
 #| fig-height: 3.4
 # A curve of metabolic rate with a Q10 of 2 (the rate doubles every 10 °C)
-q10_demo <- tibble(temp = seq(15, 35, by = 0.5)) %>%
-  mutate(rate = 2^((temp - 15) / 10))
+q10_demo <- tibble::tibble(temp = seq(15, 35, by = 0.5)) %>%
+  dplyr::mutate(rate = 2^((temp - 15) / 10))
 
 # Two studies: both start at 20 °C, but warm by 4 °C or 12 °C
-studies_q10 <- tibble(study = c("Study 1: 20 → 24 °C", "Study 2: 20 → 32 °C"),
-                      t1 = 20,
-                      t2 = c(24, 32)) %>%
-  mutate(r1 = 2^((t1 - 15) / 10),              # rate at t1
-         r2 = 2^((t2 - 15) / 10),              # rate at t2
-         lnRR = log(r2 / r1),                  # ordinary lnRR
-         lnRR_Q10 = (10 / (t2 - t1)) * lnRR,   # lnRR rescaled to 10 °C
-         label = paste0("lnRR = ", round(lnRR, 2),
-                        "\nlnRR_Q10 = ", round(lnRR_Q10, 2)))
+studies_q10 <- tibble::tibble(study = c("Study 1: 20 → 24 °C", "Study 2: 20 → 32 °C"),
+                              t1 = 20,
+                              t2 = c(24, 32)) %>%
+  dplyr::mutate(r1 = 2^((t1 - 15) / 10),              # rate at t1
+                r2 = 2^((t2 - 15) / 10),              # rate at t2
+                lnRR = log(r2 / r1),                  # ordinary lnRR
+                lnRR_Q10 = (10 / (t2 - t1)) * lnRR,   # lnRR rescaled to 10 °C
+                label = paste0("lnRR = ", round(lnRR, 2),
+                               "\nlnRR_Q10 = ", round(lnRR_Q10, 2)))
 
-ggplot(q10_demo, aes(x = temp, y = rate)) +
-  geom_line(colour = "grey50") +
-  geom_segment(data = studies_q10,
-               aes(x = t1, xend = t2, y = r1, yend = r2, colour = study),
-               linewidth = 1.6) +
-  geom_point(data = studies_q10,
-             aes(x = t2, y = r2, colour = study),
-             size = 3) +
-  geom_text(data = studies_q10,
-            aes(x = t2 + 0.5, y = r2, colour = study, label = label),
-            hjust = 0, size = 3.2, show.legend = FALSE) +
-  scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
-  xlim(15, 38) +
-  labs(x = "Temperature (°C)", y = "Metabolic rate (relative)")
+ggplot2::ggplot(q10_demo, ggplot2::aes(x = temp, y = rate)) +
+  ggplot2::geom_line(colour = "grey50") +
+  ggplot2::geom_segment(data = studies_q10,
+                        ggplot2::aes(x = t1, xend = t2, y = r1, yend = r2, colour = study),
+                        linewidth = 1.6) +
+  ggplot2::geom_point(data = studies_q10,
+                      ggplot2::aes(x = t2, y = r2, colour = study),
+                      size = 3) +
+  ggplot2::geom_text(data = studies_q10,
+                     ggplot2::aes(x = t2 + 0.5, y = r2, colour = study, label = label),
+                     hjust = 0, size = 3.2, show.legend = FALSE) +
+  ggplot2::scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
+  ggplot2::xlim(15, 38) +
+  ggplot2::labs(x = "Temperature (°C)", y = "Metabolic rate (relative)")
 ```
 
 ### $lnRR_{Q_{10}}$: Diving vertebrates and climate change
@@ -535,13 +535,13 @@ q10_es <- lnRR_Q10(t1  = q10_dat$t1,      t2  = q10_dat$t2,
 q10_dat <- cbind(q10_dat, q10_es)
 
 q10_dat %>%
-  select(study_ID, species, t1, t2, mean_t1, mean_t2, lnRR_Q10, V_lnRR_Q10) %>%
+  dplyr::select(study_ID, species, t1, t2, mean_t1, mean_t2, lnRR_Q10, V_lnRR_Q10) %>%
   head()
 
 # Back-transform with exp() to get Q10, and check it matches the Q10 already in the data
 q10_dat %>%
-  mutate(exp_lnRR_Q10 = exp(lnRR_Q10)) %>%
-  select(exp_lnRR_Q10, Q10) %>%
+  dplyr::mutate(exp_lnRR_Q10 = exp(lnRR_Q10)) %>%
+  dplyr::select(exp_lnRR_Q10, Q10) %>%
   head()
 
 ```
@@ -635,7 +635,7 @@ arr_es <- arr(m_high  = asr_dat$mean_high,     m_low  = asr_dat$mean_low,
 asr_dat <- cbind(asr_dat, arr_es)
 
 asr_dat %>%
-  select(ARR, V_ARR) %>%
+  dplyr::select(ARR, V_ARR) %>%
   head()
 ```
 
@@ -681,27 +681,27 @@ Because in biology **SD usually scales with the mean** (bigger animals or faster
 all_core_edge <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/pop_disp_raw_data.csv")
 
 # Stack the core and edge means and SDs into two columns: mean and sd
-mv <- bind_rows(
-  all_core_edge %>% select(mean = mean_core,  sd = sd_core),
-  all_core_edge %>% select(mean = mean_front, sd = sd_front)
+mv <- dplyr::bind_rows(
+  all_core_edge %>% dplyr::select(mean = mean_core,  sd = sd_core),
+  all_core_edge %>% dplyr::select(mean = mean_front, sd = sd_front)
 ) %>%
-  filter(mean > 0, sd > 0)   # logs need positive values
+  dplyr::filter(mean > 0, sd > 0)   # logs need positive values
 
-p_mv <- ggplot(mv, aes(x = log(mean), y = log(sd))) +
-  geom_point(alpha = 0.4, colour = pal["dark"]) +
-  geom_smooth(method = "lm", se = FALSE, colour = pal["red"]) +
-  labs(x = "ln(mean)", y = "ln(SD)", title = "Mean–variance relationship")
+p_mv <- ggplot2::ggplot(mv, ggplot2::aes(x = log(mean), y = log(sd))) +
+  ggplot2::geom_point(alpha = 0.4, colour = pal["dark"]) +
+  ggplot2::geom_smooth(method = "lm", se = FALSE, colour = pal["red"]) +
+  ggplot2::labs(x = "ln(mean)", y = "ln(SD)", title = "Mean–variance relationship")
 
 # Two groups with the same CV (0.2) but different means and SDs
-p_cv <- tibble(x = seq(0, 30, by = 0.1)) %>%
-  mutate(Control   = dnorm(x, mean = 10, sd = 2),
-         Treatment = dnorm(x, mean = 15, sd = 3)) %>%
-  pivot_longer(cols = c(Control, Treatment),
-               names_to = "group", values_to = "density") %>%
-  ggplot(aes(x = x, y = density, fill = group)) +
-  geom_area(alpha = 0.6, position = "identity", colour = "grey30", linewidth = 0.3) +
-  scale_fill_manual(values = c(Control = pal[["dark"]], Treatment = pal[["red"]]), name = NULL) +
-  labs(x = "Trait", y = NULL, title = "Same CV, different SD")
+p_cv <- tibble::tibble(x = seq(0, 30, by = 0.1)) %>%
+  dplyr::mutate(Control   = dnorm(x, mean = 10, sd = 2),
+                Treatment = dnorm(x, mean = 15, sd = 3)) %>%
+  tidyr::pivot_longer(cols = c(Control, Treatment),
+                      names_to = "group", values_to = "density") %>%
+  ggplot2::ggplot(ggplot2::aes(x = x, y = density, fill = group)) +
+  ggplot2::geom_area(alpha = 0.6, position = "identity", colour = "grey30", linewidth = 0.3) +
+  ggplot2::scale_fill_manual(values = c(Control = pal[["dark"]], Treatment = pal[["red"]]), name = NULL) +
+  ggplot2::labs(x = "Trait", y = NULL, title = "Same CV, different SD")
 
 p_mv + p_cv
 ```
@@ -709,21 +709,21 @@ p_mv + p_cv
 ```{r}
 #| label: variability-calc
 # Log variability ratio (measure = "VR"): only needs SDs and sample sizes
-core_edge_var <- escalc(measure = "VR",
-                        sd1i = sd_front, n1i = n_front,
-                        sd2i = sd_core,  n2i = n_core,
-                        data = ratio_data,
-                        var.names = c("lnVR", "v_lnVR"))
+core_edge_var <- metafor::escalc(measure = "VR",
+                                 sd1i = sd_front, n1i = n_front,
+                                 sd2i = sd_core,  n2i = n_core,
+                                 data = ratio_data,
+                                 var.names = c("lnVR", "v_lnVR"))
 
 # Log coefficient of variation ratio (measure = "CVR"): needs means, SDs and sample sizes
-core_edge_var <- escalc(measure = "CVR",
-                        m1i = mean_front, sd1i = sd_front, n1i = n_front,
-                        m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
-                        data = core_edge_var,
-                        var.names = c("lnCVR", "v_lnCVR"))
+core_edge_var <- metafor::escalc(measure = "CVR",
+                                 m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                                 m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+                                 data = core_edge_var,
+                                 var.names = c("lnCVR", "v_lnCVR"))
 
 core_edge_var %>%
-  select(species, response, lnVR, v_lnVR, lnCVR, v_lnCVR) %>%
+  dplyr::select(species, response, lnVR, v_lnVR, lnCVR, v_lnCVR) %>%
   head(5)
 ```
 
@@ -754,16 +754,16 @@ It is important to note that sampling variance, (sampling) standard error, preci
 #| fig-cap: "Sampling standard error of three effect sizes as a function of sample size (per group for SMD and lnRR). Uncertainty falls with the square root of n: quadrupling sample size halves the SE. For lnRR, the SE also depends on the coefficient of variation (CV = 0.3 here)."
 #| fig-height: 3.6
 # Standard error of each effect size for sample sizes from 5 to 100
-se_curves <- tibble(n = 5:100) %>%
-  mutate(`Zr`              = sqrt(1 / (n - 3)),
-         `SMD (g = 0.5)`   = sqrt((2 * n) / (n^2) + 0.5^2 / (2 * 2 * n)),
-         `lnRR (CV = 0.3)` = sqrt(2 * 0.3^2 / n)) %>%
-  pivot_longer(cols = -n, names_to = "effect_size", values_to = "se")
+se_curves <- tibble::tibble(n = 5:100) %>%
+  dplyr::mutate(`Zr`              = sqrt(1 / (n - 3)),
+                `SMD (g = 0.5)`   = sqrt((2 * n) / (n^2) + 0.5^2 / (2 * 2 * n)),
+                `lnRR (CV = 0.3)` = sqrt(2 * 0.3^2 / n)) %>%
+  tidyr::pivot_longer(cols = -n, names_to = "effect_size", values_to = "se")
 
-ggplot(se_curves, aes(x = n, y = se, colour = effect_size)) +
-  geom_line(linewidth = 1.1) +
-  scale_colour_manual(values = unname(pal[c("red", "dark", "orange")]), name = NULL) +
-  labs(x = "Sample size (n)", y = "Standard error of effect size")
+ggplot2::ggplot(se_curves, ggplot2::aes(x = n, y = se, colour = effect_size)) +
+  ggplot2::geom_line(linewidth = 1.1) +
+  ggplot2::scale_colour_manual(values = unname(pal[c("red", "dark", "orange")]), name = NULL) +
+  ggplot2::labs(x = "Sample size (n)", y = "Standard error of effect size")
 ```
 
 

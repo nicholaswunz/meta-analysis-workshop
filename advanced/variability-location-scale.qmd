@@ -39,26 +39,26 @@ Two kinds of 'variance' are involved, and it is essential not to confuse them:
 # Simulate 40 true effect sizes per group under two scenarios
 set.seed(5)
 
-homo <- tibble(model = "Homoscedastic",
-               group = rep(c("A", "B"), each = 40),
-               y = c(rnorm(40, mean = 0.2, sd = 0.15),     # same SD in both groups
-                     rnorm(40, mean = 0.4, sd = 0.15)))
+homo <- tibble::tibble(model = "Homoscedastic",
+                       group = rep(c("A", "B"), each = 40),
+                       y = c(rnorm(40, mean = 0.2, sd = 0.15),     # same SD in both groups
+                             rnorm(40, mean = 0.4, sd = 0.15)))
 
-hetero <- tibble(model = "Heteroscedastic (location-scale)",
-                 group = rep(c("A", "B"), each = 40),
-                 y = c(rnorm(40, mean = 0.2, sd = 0.08),   # different SDs
-                       rnorm(40, mean = 0.4, sd = 0.35)))
+hetero <- tibble::tibble(model = "Heteroscedastic (location-scale)",
+                         group = rep(c("A", "B"), each = 40),
+                         y = c(rnorm(40, mean = 0.2, sd = 0.08),   # different SDs
+                               rnorm(40, mean = 0.4, sd = 0.35)))
 
-ls_demo <- bind_rows(homo, hetero) %>%
-  mutate(model = fct_inorder(model))   # keep the panels in this order
+ls_demo <- dplyr::bind_rows(homo, hetero) %>%
+  dplyr::mutate(model = forcats::fct_inorder(model))   # keep the panels in this order
 
-ggplot(ls_demo, aes(x = group, y = y, colour = group)) +
-  geom_hline(yintercept = 0, colour = "grey70") +
-  geom_jitter(width = 0.12, alpha = 0.6, size = 2) +
-  stat_summary(fun = mean, geom = "point", shape = 18, size = 6, colour = "black") +  # group means
-  facet_wrap(~ model) +
-  scale_colour_manual(values = unname(pal[c("dark", "red")]), guide = "none") +
-  labs(x = "Moderator level", y = "True effect size")
+ggplot2::ggplot(ls_demo, ggplot2::aes(x = group, y = y, colour = group)) +
+  ggplot2::geom_hline(yintercept = 0, colour = "grey70") +
+  ggplot2::geom_jitter(width = 0.12, alpha = 0.6, size = 2) +
+  ggplot2::stat_summary(fun = mean, geom = "point", shape = 18, size = 6, colour = "black") +  # group means
+  ggplot2::facet_wrap(~ model) +
+  ggplot2::scale_colour_manual(values = unname(pal[c("dark", "red")]), guide = "none") +
+  ggplot2::labs(x = "Moderator level", y = "True effect size")
 ```
 
 # Data: physiology of range-core vs range-edge populations
@@ -72,36 +72,36 @@ ce <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-
 
 # lnRR and lnCVR need positive means, so keep only rows where both means are > 0
 ce <- ce %>%
-  filter(mean_core > 0, mean_front > 0)
+  dplyr::filter(mean_core > 0, mean_front > 0)
 
 # Effect size ID, and dispersal mode as a factor (a categorical moderator)
 ce$es_ID     <- 1:nrow(ce)
 ce$disp_mode <- factor(ce$disp_mode)
 
 # Model 1 effect size: lnRR (edge = group 1, core = group 2)
-ce <- escalc(measure = "ROM",
-             m1i = mean_front, sd1i = sd_front, n1i = n_front,
-             m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
-             data = ce,
-             var.names = c("lnRR", "v_lnRR"))
+ce <- metafor::escalc(measure = "ROM",
+                      m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                      m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+                      data = ce,
+                      var.names = c("lnRR", "v_lnRR"))
 
 # Model 2 effect sizes: lnVR ...
-ce <- escalc(measure = "VR",
-             sd1i = sd_front, n1i = n_front,
-             sd2i = sd_core,  n2i = n_core,
-             data = ce,
-             var.names = c("lnVR", "v_lnVR"))
+ce <- metafor::escalc(measure = "VR",
+                      sd1i = sd_front, n1i = n_front,
+                      sd2i = sd_core,  n2i = n_core,
+                      data = ce,
+                      var.names = c("lnVR", "v_lnVR"))
 
 # ... and lnCVR
-ce <- escalc(measure = "CVR",
-             m1i = mean_front, sd1i = sd_front, n1i = n_front,
-             m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
-             data = ce,
-             var.names = c("lnCVR", "v_lnCVR"))
+ce <- metafor::escalc(measure = "CVR",
+                      m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                      m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+                      data = ce,
+                      var.names = c("lnCVR", "v_lnCVR"))
 
 # Number of effect sizes for each dispersal mode
 ce %>%
-  count(disp_mode)
+  dplyr::count(disp_mode)
 ```
 
 ---
@@ -111,13 +111,13 @@ ce %>%
 ```{r}
 #| label: m1
 # Multilevel meta-analysis of lnRR
-m1_lnRR <- rma.mv(yi = lnRR,
-                  V = v_lnRR,
-                  random = list(~ 1 | study_ID,
-                                ~ 1 | es_ID),
-                  test = "t",
-                  dfs = "contain",
-                  data = ce)
+m1_lnRR <- metafor::rma.mv(yi = lnRR,
+                           V = v_lnRR,
+                           random = list(~ 1 | study_ID,
+                                         ~ 1 | es_ID),
+                           test = "t",
+                           dfs = "contain",
+                           data = ce)
 
 summary(m1_lnRR)
 ```
@@ -127,24 +127,24 @@ summary(m1_lnRR)
 ```{r}
 #| label: m2
 # Multilevel meta-analysis of lnCVR (the same model, a different effect size)
-m2_lnCVR <- rma.mv(yi = lnCVR,
-                   V = v_lnCVR,
-                   random = list(~ 1 | study_ID,
-                                 ~ 1 | es_ID),
-                   test = "t",
-                   dfs = "contain",
-                   data = ce)
+m2_lnCVR <- metafor::rma.mv(yi = lnCVR,
+                            V = v_lnCVR,
+                            random = list(~ 1 | study_ID,
+                                          ~ 1 | es_ID),
+                            test = "t",
+                            dfs = "contain",
+                            data = ce)
 
 summary(m2_lnCVR)
 
 # lnVR for comparison (ignores the mean-variance relationship)
-m2_lnVR <- rma.mv(yi = lnVR,
-                  V = v_lnVR,
-                  random = list(~ 1 | study_ID,
-                                ~ 1 | es_ID),
-                  test = "t",
-                  dfs = "contain",
-                  data = ce)
+m2_lnVR <- metafor::rma.mv(yi = lnVR,
+                           V = v_lnVR,
+                           random = list(~ 1 | study_ID,
+                                         ~ 1 | es_ID),
+                           test = "t",
+                           dfs = "contain",
+                           data = ce)
 
 # Compare the three overall means
 model_means <- data.frame(
@@ -167,17 +167,17 @@ model_means
 #| fig-cap: "Orchard plots of Model 1 (mean, lnRR) and Model 2 (relative variability, lnCVR) for edge vs core populations."
 #| fig-height: 3.6
 #| fig-width: 10
-p_m1 <- orchard_plot(m1_lnRR,
-                     mod = "1",
-                     group = "study_ID",
-                     xlab = "lnRR (edge / core)",
-                     cb = FALSE)
+p_m1 <- orchaRd::orchard_plot(m1_lnRR,
+                              mod = "1",
+                              group = "study_ID",
+                              xlab = "lnRR (edge / core)",
+                              cb = FALSE)
 
-p_m2 <- orchard_plot(m2_lnCVR,
-                     mod = "1",
-                     group = "study_ID",
-                     xlab = "lnCVR (edge / core)",
-                     cb = FALSE)
+p_m2 <- orchaRd::orchard_plot(m2_lnCVR,
+                              mod = "1",
+                              group = "study_ID",
+                              xlab = "lnCVR (edge / core)",
+                              cb = FALSE)
 
 p_m1 + p_m2   # side by side with patchwork
 ```
@@ -212,25 +212,25 @@ For a **categorical** moderator, a multilevel location-scale model can be fitted
 ```{r}
 #| label: m3
 # Homoscedastic meta-regression (the same within-study variance for all levels)
-m3_hom <- rma.mv(yi = lnRR,
-                 V = v_lnRR,
-                 mods = ~ disp_mode,
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID),
-                 test = "t",
-                 dfs = "contain",
-                 data = ce)
+m3_hom <- metafor::rma.mv(yi = lnRR,
+                          V = v_lnRR,
+                          mods = ~ disp_mode,
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID),
+                          test = "t",
+                          dfs = "contain",
+                          data = ce)
 
 # Location-scale: one within-study variance per dispersal mode
-m3_ls <- rma.mv(yi = lnRR,
-                V = v_lnRR,
-                mods = ~ disp_mode,
-                random = list(~ 1 | study_ID,
-                              ~ disp_mode | es_ID),   # inner = moderator, outer = effect size
-                struct = "DIAG",                      # a separate variance (tau^2) per level
-                test = "t",
-                dfs = "contain",
-                data = ce)
+m3_ls <- metafor::rma.mv(yi = lnRR,
+                         V = v_lnRR,
+                         mods = ~ disp_mode,
+                         random = list(~ 1 | study_ID,
+                                       ~ disp_mode | es_ID),   # inner = moderator, outer = effect size
+                         struct = "DIAG",                      # a separate variance (tau^2) per level
+                         test = "t",
+                         dfs = "contain",
+                         data = ce)
 
 summary(m3_ls)
 
@@ -260,11 +260,11 @@ scale_tbl
 
 ```{r}
 #| label: m3-rma
-m3_rma <- rma(yi = lnRR,
-              vi = v_lnRR,
-              mods = ~ disp_mode,     # location part
-              scale = ~ disp_mode,    # scale part: ln(tau^2) = alpha0 + alpha1 * x
-              data = ce)
+m3_rma <- metafor::rma(yi = lnRR,
+                       vi = v_lnRR,
+                       mods = ~ disp_mode,     # location part
+                       scale = ~ disp_mode,    # scale part: ln(tau^2) = alpha0 + alpha1 * x
+                       data = ce)
 
 summary(m3_rma)
 ```
@@ -284,13 +284,13 @@ library(brms)
 
 # sigma = TRUE: estimate a residual SD (the effect-size-level heterogeneity) in addition
 # to the known sampling SE; 'sigma ~ disp_mode' makes that SD depend on the moderator
-m3_brms <- brm(
-  bf(lnRR | se(sqrt(v_lnRR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
-     sigma ~ disp_mode),
+m3_brms <- brms::brm(
+  brms::bf(lnRR | se(sqrt(v_lnRR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
+           sigma ~ disp_mode),
   data = ce, family = gaussian(),
-  prior = c(prior(normal(0, 1), class = "b"),
-            prior(normal(0, 1), class = "b", dpar = "sigma"),
-            prior(student_t(3, 0, 0.5), class = "sd")),
+  prior = c(brms::prior(normal(0, 1), class = "b"),
+            brms::prior(normal(0, 1), class = "b", dpar = "sigma"),
+            brms::prior(student_t(3, 0, 0.5), class = "sd")),
   chains = 4, cores = 4, iter = 4000, warmup = 1000, seed = 2026,
   control = list(adapt_delta = 0.95), file = here::here("brms_fits", "m3_brms"))
 
@@ -313,25 +313,25 @@ The same machinery applied to the variability effect size: does dispersal mode a
 ```{r}
 #| label: m4
 # Location-scale model for lnCVR
-m4_ls <- rma.mv(yi = lnCVR,
-                V = v_lnCVR,
-                mods = ~ disp_mode,
-                random = list(~ 1 | study_ID,
-                              ~ disp_mode | es_ID),
-                struct = "DIAG",
-                test = "t",
-                dfs = "contain",
-                data = ce)
+m4_ls <- metafor::rma.mv(yi = lnCVR,
+                         V = v_lnCVR,
+                         mods = ~ disp_mode,
+                         random = list(~ 1 | study_ID,
+                                       ~ disp_mode | es_ID),
+                         struct = "DIAG",
+                         test = "t",
+                         dfs = "contain",
+                         data = ce)
 
 # Homoscedastic model for comparison
-m4_hom <- rma.mv(yi = lnCVR,
-                 V = v_lnCVR,
-                 mods = ~ disp_mode,
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID),
-                 test = "t",
-                 dfs = "contain",
-                 data = ce)
+m4_hom <- metafor::rma.mv(yi = lnCVR,
+                          V = v_lnCVR,
+                          mods = ~ disp_mode,
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID),
+                          test = "t",
+                          dfs = "contain",
+                          data = ce)
 
 summary(m4_ls)
 anova(m4_ls, m4_hom)
@@ -344,7 +344,7 @@ anova(m4_ls, m4_hom)
 #| fig-width: 10
 # A function that collects the location (group means) and scale (SDs) of a model
 loc_scale_tbl <- function(mod, label) {
-  loc <- mod_results(mod, mod = "disp_mode", group = "study_ID")$mod_table
+  loc <- orchaRd::mod_results(mod, mod = "disp_mode", group = "study_ID")$mod_table
   data.frame(model     = label,
              disp_mode = loc$name,
              location  = loc$estimate,
@@ -353,22 +353,22 @@ loc_scale_tbl <- function(mod, label) {
              sigma     = sqrt(mod$tau2))   # heterogeneity SD for each level
 }
 
-ls_tbl <- bind_rows(loc_scale_tbl(m3_ls, "Model 3: lnRR"),
-                    loc_scale_tbl(m4_ls, "Model 4: lnCVR"))
+ls_tbl <- dplyr::bind_rows(loc_scale_tbl(m3_ls, "Model 3: lnRR"),
+                           loc_scale_tbl(m4_ls, "Model 4: lnCVR"))
 
 # Top: location (means with 95% CIs)
-p_loc <- ggplot(ls_tbl, aes(x = location, y = disp_mode)) +
-  geom_vline(xintercept = 0, colour = "grey60") +
-  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0.15, orientation = "y") +
-  geom_point(size = 3, colour = pal["red"]) +
-  facet_wrap(~ model, scales = "free_x") +
-  labs(x = "Location: mean effect (95% CI)", y = NULL)
+p_loc <- ggplot2::ggplot(ls_tbl, ggplot2::aes(x = location, y = disp_mode)) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey60") +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = lower, xmax = upper), width = 0.15, orientation = "y") +
+  ggplot2::geom_point(size = 3, colour = pal["red"]) +
+  ggplot2::facet_wrap(~ model, scales = "free_x") +
+  ggplot2::labs(x = "Location: mean effect (95% CI)", y = NULL)
 
 # Bottom: scale (heterogeneity SDs)
-p_scale <- ggplot(ls_tbl, aes(x = sigma, y = disp_mode)) +
-  geom_col(fill = pal["dark"], width = 0.6) +
-  facet_wrap(~ model, scales = "free_x") +
-  labs(x = "Scale: heterogeneity SD (σ)", y = NULL)
+p_scale <- ggplot2::ggplot(ls_tbl, ggplot2::aes(x = sigma, y = disp_mode)) +
+  ggplot2::geom_col(fill = pal["dark"], width = 0.6) +
+  ggplot2::facet_wrap(~ model, scales = "free_x") +
+  ggplot2::labs(x = "Scale: heterogeneity SD (σ)", y = NULL)
 
 p_loc / p_scale   # one above the other with patchwork
 ```
@@ -385,24 +385,24 @@ p_loc / p_scale   # one above the other with patchwork
 #| label: your-turn-answers
 
 # 1. Thermal strategy as the moderator (Model 3 shown; Model 4 is the same with lnCVR)
-m3_ts <- rma.mv(yi = lnRR,
-                V = v_lnRR,
-                mods = ~ thermal_strategy,
-                random = list(~ 1 | study_ID,
-                              ~ thermal_strategy | es_ID),
-                struct = "DIAG",
-                test = "t",
-                dfs = "contain",
-                data = ce)
+m3_ts <- metafor::rma.mv(yi = lnRR,
+                         V = v_lnRR,
+                         mods = ~ thermal_strategy,
+                         random = list(~ 1 | study_ID,
+                                       ~ thermal_strategy | es_ID),
+                         struct = "DIAG",
+                         test = "t",
+                         dfs = "contain",
+                         data = ce)
 
 round(m3_ts$tau2, 4)   # within-study variance for ectotherms and endotherms
 
 # 2. Does heterogeneity change with the distance between the core and the edge?
-m3_dist <- rma(yi = lnRR,
-               vi = v_lnRR,
-               mods = ~ log(dist_km),
-               scale = ~ log(dist_km),
-               data = ce)
+m3_dist <- metafor::rma(yi = lnRR,
+                        vi = v_lnRR,
+                        mods = ~ log(dist_km),
+                        scale = ~ log(dist_km),
+                        data = ce)
 
 summary(m3_dist)
 ```

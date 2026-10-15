@@ -37,12 +37,12 @@ Of course, often **we will never know whether such biases exist, and high hetero
 #| fig-height: 4
 # Simulate 200 studies with sample sizes between 10 and 300 and a true Zr of 0.1
 set.seed(11)
-all_studies <- tibble(n = round(exp(runif(200, log(10), log(300))))) %>%
-  mutate(Zr_v = 1 / (n - 3),                              # sampling variance of Zr
-         Zr   = rnorm(200, mean = 0.1, sd = sqrt(Zr_v)),  # observed effect sizes
-         p    = 2 * pnorm(-abs(Zr / sqrt(Zr_v))),         # p-value of each study
-         # 'published' if significant and positive, otherwise only 20% of the time
-         published = (p < 0.05 & Zr > 0) | runif(200) < 0.2)
+all_studies <- tibble::tibble(n = round(exp(runif(200, log(10), log(300))))) %>%
+  dplyr::mutate(Zr_v = 1 / (n - 3),                              # sampling variance of Zr
+                Zr   = rnorm(200, mean = 0.1, sd = sqrt(Zr_v)),  # observed effect sizes
+                p    = 2 * pnorm(-abs(Zr / sqrt(Zr_v))),         # p-value of each study
+                # 'published' if significant and positive, otherwise only 20% of the time
+                published = (p < 0.05 & Zr > 0) | runif(200) < 0.2)
 
 # A function that draws a funnel plot for a data set
 funnel_gg <- function(dat, title) {
@@ -51,23 +51,23 @@ funnel_gg <- function(dat, title) {
   mu <- weighted.mean(dat$Zr, 1 / dat$Zr_v)
 
   # Lines of the funnel: mean +/- 1.96 SE
-  se_grid <- tibble(se = seq(0, max(sqrt(dat$Zr_v)), length.out = 50)) %>%
-    mutate(lower = mu - 1.96 * se,
-           upper = mu + 1.96 * se)
+  se_grid <- tibble::tibble(se = seq(0, max(sqrt(dat$Zr_v)), length.out = 50)) %>%
+    dplyr::mutate(lower = mu - 1.96 * se,
+                  upper = mu + 1.96 * se)
 
-  ggplot(dat, aes(x = Zr, y = sqrt(Zr_v))) +
-    geom_line(data = se_grid, aes(x = lower, y = se), linetype = "dashed", colour = "grey50") +
-    geom_line(data = se_grid, aes(x = upper, y = se), linetype = "dashed", colour = "grey50") +
-    geom_vline(xintercept = mu, colour = pal["red"]) +                       # estimated mean
-    geom_vline(xintercept = 0.1, colour = pal["dark"], linetype = "dotted") + # true mean
-    geom_point(alpha = 0.6, colour = pal["red"]) +
-    scale_y_reverse() +                       # most precise studies at the top
-    labs(x = "Effect size (Zr)", y = "Standard error", title = title,
-         subtitle = paste0("weighted mean = ", round(mu, 2), " (truth = 0.10)"))
+  ggplot2::ggplot(dat, ggplot2::aes(x = Zr, y = sqrt(Zr_v))) +
+    ggplot2::geom_line(data = se_grid, ggplot2::aes(x = lower, y = se), linetype = "dashed", colour = "grey50") +
+    ggplot2::geom_line(data = se_grid, ggplot2::aes(x = upper, y = se), linetype = "dashed", colour = "grey50") +
+    ggplot2::geom_vline(xintercept = mu, colour = pal["red"]) +                       # estimated mean
+    ggplot2::geom_vline(xintercept = 0.1, colour = pal["dark"], linetype = "dotted") + # true mean
+    ggplot2::geom_point(alpha = 0.6, colour = pal["red"]) +
+    ggplot2::scale_y_reverse() +                       # most precise studies at the top
+    ggplot2::labs(x = "Effect size (Zr)", y = "Standard error", title = title,
+                  subtitle = paste0("weighted mean = ", round(mu, 2), " (truth = 0.10)"))
 }
 
 funnel_gg(all_studies, "All studies") +
-  funnel_gg(filter(all_studies, published), "Published studies only")
+  funnel_gg(dplyr::filter(all_studies, published), "Published studies only")
 ```
 
 # Worked example: metabolic rate and fitness
@@ -84,33 +84,33 @@ arnold_data <- read.csv("https://raw.githubusercontent.com/pieterarnold/fitness-
 
 # Remove rows with a missing sample size (n.rep) or correlation (r)
 arnold_data <- arnold_data %>%
-  filter(!is.na(n.rep), !is.na(r))
+  dplyr::filter(!is.na(n.rep), !is.na(r))
 
 # Calculate the effect size (Zr) and its sampling variance (Zr_v)
-arnold_data <- escalc(measure = "ZCOR",
-                      ri = r,
-                      ni = n.rep,
-                      data = arnold_data,
-                      var.names = c("Zr", "Zr_v"))
+arnold_data <- metafor::escalc(measure = "ZCOR",
+                               ri = r,
+                               ni = n.rep,
+                               data = arnold_data,
+                               var.names = c("Zr", "Zr_v"))
 
 # Keep only endotherms (mammals and birds) for this demonstration.
 # One extreme outlier (Zr > 3) was also removed in the original paper.
 arnold_data_endo <- arnold_data %>%
-  filter(Class %in% c("Mammalia", "Aves"),
-         Zr <= 3)
+  dplyr::filter(Class %in% c("Mammalia", "Aves"),
+                Zr <= 3)
 
 # Add an effect size ID and the sampling standard error
 arnold_data_endo$es_ID <- 1:nrow(arnold_data_endo)
 arnold_data_endo$sei   <- sqrt(arnold_data_endo$Zr_v)
 
 # Multilevel meta-analytic model (Ref = study)
-mod_arnold <- rma.mv(yi = Zr,
-                     V = Zr_v,
-                     random = list(~ 1 | Ref,
-                                   ~ 1 | es_ID),
-                     test = "t",
-                     dfs = "contain",
-                     data = arnold_data_endo)
+mod_arnold <- metafor::rma.mv(yi = Zr,
+                              V = Zr_v,
+                              random = list(~ 1 | Ref,
+                                            ~ 1 | es_ID),
+                              test = "t",
+                              dfs = "contain",
+                              data = arnold_data_endo)
 
 summary(mod_arnold)
 ```
@@ -134,17 +134,17 @@ If no publication bias exists, then we would expect the plot to look fairly symm
 #| fig-cap: "Funnel plot depicting the correlation between metabolism and fitness as a function of precision (1 / SE). The dotted lines are the theoretical 95% sampling variance intervals – the interval within which we expect effect size estimates to fall if only sampling variance drives differences in effects. Shaded regions represent the p-values of studies. The white region indicates studies where the p-value is between 0.1 and 1; dark grey, where the p-value is between 0.05 and 0.1; and the lighter grey regions, where the p-value is significant."
 
 # Contour-enhanced funnel plot of the effect sizes against precision (1 / SE)
-funnel(x = arnold_data_endo$Zr,                  # effect sizes
-       vi = arnold_data_endo$Zr_v,               # sampling variances
-       yaxis = "seinv",                          # y-axis = precision (1 / SE)
-       level = c(0.1, 0.05, 0.01),               # p-value contours
-       shade = c("white", "gray55", "gray75"),   # colours of the contours
-       col = "#e12744",                          # colour of the points
-       digits = 2,
-       las = 1,                                  # horizontal axis labels
-       xlab = "Correlation coefficient (r)",
-       atransf = tanh,                           # label the x-axis on the r scale
-       legend = TRUE)
+metafor::funnel(x = arnold_data_endo$Zr,                  # effect sizes
+                vi = arnold_data_endo$Zr_v,               # sampling variances
+                yaxis = "seinv",                          # y-axis = precision (1 / SE)
+                level = c(0.1, 0.05, 0.01),               # p-value contours
+                shade = c("white", "gray55", "gray75"),   # colours of the contours
+                col = "#e12744",                          # colour of the points
+                digits = 2,
+                las = 1,                                  # horizontal axis labels
+                xlab = "Correlation coefficient (r)",
+                atransf = tanh,                           # label the x-axis on the r scale
+                legend = TRUE)
 ```
 
 We can see from @fig-funnel above the typical funnel shape. You will notice that most effects lie in the positive correlation space – in other words, there is a **strong positive correlation between RMR and fitness**. However, we also find some studies that show the opposite pattern. We expect this based on sampling theory alone, and indeed many of these effects fall close to the dotted sampling error intervals. Studies in the light grey regions are studies where the p-value was significant. 
@@ -183,14 +183,14 @@ We can achieve this to some extent by plotting a **funnel plot of meta-analytic 
 #| label: metareg
 
 # Meta-regression with fitness type as a moderator
-metareg <- rma.mv(yi = Zr,
-                  V = Zr_v,
-                  mods = ~ FitnessClassification,   # type of fitness component
-                  random = list(~ 1 | Ref,
-                                ~ 1 | es_ID),
-                  test = "t",
-                  dfs = "contain",
-                  data = arnold_data_endo)
+metareg <- metafor::rma.mv(yi = Zr,
+                           V = Zr_v,
+                           mods = ~ FitnessClassification,   # type of fitness component
+                           random = list(~ 1 | Ref,
+                                         ~ 1 | es_ID),
+                           test = "t",
+                           dfs = "contain",
+                           data = arnold_data_endo)
 
 summary(metareg)
 ```
@@ -201,7 +201,7 @@ We can have a look at how much variation this model explains by calculating marg
 #| label: metareg-r2
 
 # How much variation does the model explain? (as a %)
-r2_ml(metareg) * 100
+orchaRd::r2_ml(metareg) * 100
 ```
 
 ### What is the difference between marginal and conditional $R^2$?
@@ -236,7 +236,7 @@ Now that we have a full model estimated, we can extract the residuals from this 
 resid_marg <- residuals(metareg)
 
 # BLUPs: the estimated random effect of each study (Ref) and each effect size (es_ID)
-blups <- ranef(metareg)
+blups <- metafor::ranef(metareg)
 
 # Find the BLUPs that belong to each row of the data
 study_blup <- blups$Ref$intrcpt[match(arnold_data_endo$Ref, rownames(blups$Ref))]
@@ -250,27 +250,27 @@ resid_cond <- resid_marg - study_blup - es_blup
 # it is residual heterogeneity (or bias).
 par(mfrow = c(1, 2))
 
-funnel(x = resid_marg,
-       vi = arnold_data_endo$Zr_v,
-       yaxis = "seinv",
-       level = c(0.1, 0.05, 0.01),
-       shade = c("white", "gray55", "gray75"),
-       col = "#e12744",
-       digits = 2,
-       las = 1,
-       xlab = "Meta-analytic residuals (marginal)",
-       legend = FALSE)
+metafor::funnel(x = resid_marg,
+                vi = arnold_data_endo$Zr_v,
+                yaxis = "seinv",
+                level = c(0.1, 0.05, 0.01),
+                shade = c("white", "gray55", "gray75"),
+                col = "#e12744",
+                digits = 2,
+                las = 1,
+                xlab = "Meta-analytic residuals (marginal)",
+                legend = FALSE)
 
-funnel(x = resid_cond,
-       vi = arnold_data_endo$Zr_v,
-       yaxis = "seinv",
-       level = c(0.1, 0.05, 0.01),
-       shade = c("white", "gray55", "gray75"),
-       col = "#e12744",
-       digits = 2,
-       las = 1,
-       xlab = "Meta-analytic residuals (conditional)",
-       legend = FALSE)
+metafor::funnel(x = resid_cond,
+                vi = arnold_data_endo$Zr_v,
+                yaxis = "seinv",
+                level = c(0.1, 0.05, 0.01),
+                shade = c("white", "gray55", "gray75"),
+                col = "#e12744",
+                digits = 2,
+                las = 1,
+                xlab = "Meta-analytic residuals (conditional)",
+                legend = FALSE)
 
 par(mfrow = c(1, 1))   # back to one plot per figure
 ```
@@ -304,15 +304,15 @@ par(mfrow = c(1, 1))   # back to one plot per figure
 ```{r}
 #| label: classic
 # Both methods require a standard (two-level) random-effects model
-mod_re_arnold <- rma(yi = Zr,
-                     vi = Zr_v,
-                     data = arnold_data_endo)
+mod_re_arnold <- metafor::rma(yi = Zr,
+                              vi = Zr_v,
+                              data = arnold_data_endo)
 
 # Egger's regression test (uses the standard error as the predictor)
-regtest(mod_re_arnold, predictor = "sei")
+metafor::regtest(mod_re_arnold, predictor = "sei")
 
 # Trim-and-fill
-tf <- trimfill(mod_re_arnold)
+tf <- metafor::trimfill(mod_re_arnold)
 tf
 ```
 
@@ -321,10 +321,10 @@ tf
 #| fig-cap: "Funnel plot with trim-and-fill: open circles are the imputed 'missing' effect sizes."
 #| fig-height: 4.5
 #| fig-width: 6
-funnel(tf,
-       xlab = "Fisher's Zr",
-       col = "#e12744",               # observed effect sizes
-       legend = list(show = "cis"))
+metafor::funnel(tf,
+                xlab = "Fisher's Zr",
+                col = "#e12744",               # observed effect sizes
+                legend = list(show = "cis"))
 ```
 
 ::: {.callout-warning}
@@ -399,14 +399,14 @@ Let's now apply the methods proposed above to @Arnold2021's data. To keep things
 #| label: metareg-se
 
 # Sampling standard error (sei = sqrt(Zr_v)) as the moderator
-metareg_se <- rma.mv(yi = Zr,
-                     V = Zr_v,
-                     mods = ~ sei,
-                     random = list(~ 1 | Ref,
-                                   ~ 1 | es_ID),
-                     test = "t",
-                     dfs = "contain",
-                     data = arnold_data_endo)
+metareg_se <- metafor::rma.mv(yi = Zr,
+                              V = Zr_v,
+                              mods = ~ sei,
+                              random = list(~ 1 | Ref,
+                                            ~ 1 | es_ID),
+                              test = "t",
+                              dfs = "contain",
+                              data = arnold_data_endo)
 
 summary(metareg_se)
 ```
@@ -418,14 +418,14 @@ We'll also fit the model with the sampling variance for good measure, but if the
 #| echo: true
 
 # Sampling variance (Zr_v) as the moderator
-metareg_v <- rma.mv(yi = Zr,
-                    V = Zr_v,
-                    mods = ~ Zr_v,
-                    random = list(~ 1 | Ref,
-                                  ~ 1 | es_ID),
-                    test = "t",
-                    dfs = "contain",
-                    data = arnold_data_endo)
+metareg_v <- metafor::rma.mv(yi = Zr,
+                             V = Zr_v,
+                             mods = ~ Zr_v,
+                             random = list(~ 1 | Ref,
+                                           ~ 1 | es_ID),
+                             test = "t",
+                             dfs = "contain",
+                             data = arnold_data_endo)
 
 summary(metareg_v)
 ```
@@ -475,14 +475,14 @@ We can test this directly by including publication year as a moderator in the mu
 arnold_data_endo$year_c <- arnold_data_endo$Year - mean(arnold_data_endo$Year)
 
 # Publication year (centred) as the moderator
-metareg_year <- rma.mv(yi = Zr,
-                       V = Zr_v,
-                       mods = ~ year_c,
-                       random = list(~ 1 | Ref,
-                                     ~ 1 | es_ID),
-                       test = "t",
-                       dfs = "contain",
-                       data = arnold_data_endo)
+metareg_year <- metafor::rma.mv(yi = Zr,
+                                V = Zr_v,
+                                mods = ~ year_c,
+                                random = list(~ 1 | Ref,
+                                              ~ 1 | es_ID),
+                                test = "t",
+                                dfs = "contain",
+                                data = arnold_data_endo)
 
 summary(metareg_year)
 ```
@@ -494,14 +494,14 @@ We can also fit a combined model that tests for small-study effects and time-lag
 #| echo: true
 
 # Standard error and publication year together
-metareg_full <- rma.mv(yi = Zr,
-                       V = Zr_v,
-                       mods = ~ sei + year_c,
-                       random = list(~ 1 | Ref,
-                                     ~ 1 | es_ID),
-                       test = "t",
-                       dfs = "contain",
-                       data = arnold_data_endo)
+metareg_full <- metafor::rma.mv(yi = Zr,
+                                V = Zr_v,
+                                mods = ~ sei + year_c,
+                                random = list(~ 1 | Ref,
+                                              ~ 1 | es_ID),
+                                test = "t",
+                                dfs = "contain",
+                                data = arnold_data_endo)
 
 summary(metareg_full)
 ```
@@ -528,22 +528,22 @@ summary(metareg_full)
 #| fig-height: 4
 #| fig-width: 10
 # Small-study effect
-p_se <- bubble_plot(metareg_se,
-                    mod = "sei",
-                    group = "Ref",
-                    xlab = "Standard error",
-                    ylab = "Zr",
-                    legend.pos = "none",
-                    est.col = "#e12744")   # colour of the regression line
+p_se <- orchaRd::bubble_plot(metareg_se,
+                             mod = "sei",
+                             group = "Ref",
+                             xlab = "Standard error",
+                             ylab = "Zr",
+                             legend.pos = "none",
+                             est.col = "#e12744")   # colour of the regression line
 
 # Time-lag effect
-p_yr <- bubble_plot(metareg_full,
-                    mod = "year_c",
-                    group = "Ref",
-                    xlab = "Publication year (centred)",
-                    ylab = "Zr",
-                    legend.pos = "none",
-                    est.col = "#e12744")
+p_yr <- orchaRd::bubble_plot(metareg_full,
+                             mod = "year_c",
+                             group = "Ref",
+                             xlab = "Publication year (centred)",
+                             ylab = "Zr",
+                             legend.pos = "none",
+                             est.col = "#e12744")
 
 p_se + p_yr
 ```
@@ -596,37 +596,37 @@ Let's apply this to the Arnold endotherm data. We'll compare the naive multileve
 
 # (a) Naive multilevel meta-analytic mean (weights include tau^2)
 #     This is the same model as mod_arnold above
-mod_naive <- rma.mv(yi = Zr,
-                    V = Zr_v,
-                    random = list(~ 1 | Ref,
-                                  ~ 1 | es_ID),
-                    test = "t",
-                    dfs = "contain",
-                    data = arnold_data_endo)
+mod_naive <- metafor::rma.mv(yi = Zr,
+                             V = Zr_v,
+                             random = list(~ 1 | Ref,
+                                           ~ 1 | es_ID),
+                             test = "t",
+                             dfs = "contain",
+                             data = arnold_data_endo)
 
 # (b) Step 1 of Yang et al. (2024): bias-robust FE + VCV model.
 #     Build a within-study (co)variance matrix assuming a sampling correlation
 #     of 0.5 between effect sizes from the same study...
-VCV <- vcalc(vi = Zr_v,
-             cluster = Ref,     # effect sizes from the same study are correlated
-             obs = es_ID,
-             rho = 0.5,         # assumed correlation
-             data = arnold_data_endo)
+VCV <- metafor::vcalc(vi = Zr_v,
+                      cluster = Ref,     # effect sizes from the same study are correlated
+                      obs = es_ID,
+                      rho = 0.5,         # assumed correlation
+                      data = arnold_data_endo)
 
 #     ...then fit a fixed-effect model (note: no random argument)
-mod_MLFE <- rma.mv(yi = Zr,
-                   V = VCV,
-                   test = "t",
-                   dfs = "contain",
-                   data = arnold_data_endo)
+mod_MLFE <- metafor::rma.mv(yi = Zr,
+                            V = VCV,
+                            test = "t",
+                            dfs = "contain",
+                            data = arnold_data_endo)
 
 summary(mod_MLFE)
 
 # (c) Step 2: cluster-robust (CR2) standard errors, with study (Ref) as the cluster
-mod_MLFE_RVE <- robust(mod_MLFE,
-                       cluster = arnold_data_endo$Ref,
-                       adjust = TRUE,
-                       clubSandwich = TRUE)
+mod_MLFE_RVE <- metafor::robust(mod_MLFE,
+                                cluster = arnold_data_endo$Ref,
+                                adjust = TRUE,
+                                clubSandwich = TRUE)
 
 mod_MLFE_RVE
 ```
@@ -695,28 +695,28 @@ For **Zr**, $SE = 1/\sqrt{n-3}$ depends only on sample size, so we can use `sei`
 #| label: your-turn-answers
 
 # 1. Sampling variance instead of standard error
-metareg_full_v <- rma.mv(yi = Zr,
-                         V = Zr_v,
-                         mods = ~ Zr_v + year_c,
-                         random = list(~ 1 | Ref,
-                                       ~ 1 | es_ID),
-                         test = "t",
-                         dfs = "contain",
-                         data = arnold_data_endo)
+metareg_full_v <- metafor::rma.mv(yi = Zr,
+                                  V = Zr_v,
+                                  mods = ~ Zr_v + year_c,
+                                  random = list(~ 1 | Ref,
+                                                ~ 1 | es_ID),
+                                  test = "t",
+                                  dfs = "contain",
+                                  data = arnold_data_endo)
 
 # Compare the two intercepts (adjusted means)
 metareg_full$b[1]     # with SE
 metareg_full_v$b[1]   # with V
 
 # 2. Add Class (birds vs mammals) as a biological moderator
-metareg_full_class <- rma.mv(yi = Zr,
-                             V = Zr_v,
-                             mods = ~ sei + year_c + Class,
-                             random = list(~ 1 | Ref,
-                                           ~ 1 | es_ID),
-                             test = "t",
-                             dfs = "contain",
-                             data = arnold_data_endo)
+metareg_full_class <- metafor::rma.mv(yi = Zr,
+                                      V = Zr_v,
+                                      mods = ~ sei + year_c + Class,
+                                      random = list(~ 1 | Ref,
+                                                    ~ 1 | es_ID),
+                                      test = "t",
+                                      dfs = "contain",
+                                      data = arnold_data_endo)
 
 summary(metareg_full_class)
 ```

@@ -31,8 +31,8 @@ corr_dat     <- read.csv(here::here("data", "sim_correlation.csv"))
 contrast_dat <- read.csv(here::here("data", "sim_contrast.csv"))
 
 # Have a quick look: column names, column types and the first few values
-glimpse(corr_dat)
-glimpse(contrast_dat)
+dplyr::glimpse(corr_dat)
+dplyr::glimpse(contrast_dat)
 ```
 
 ::: {.callout-note}
@@ -88,10 +88,10 @@ A completed workbook is in `excel/correlation_solution.xlsx`.
 ```{r}
 #| label: a1-escalc
 # Calculate Zr (yi) and its sampling variance (vi) for every row
-corr_es <- escalc(measure = "ZCOR",      # Fisher's z-transformed correlation
-                  ri = r,                # column with the correlation
-                  ni = sample_size,      # column with the sample size
-                  data = corr_dat)
+corr_es <- metafor::escalc(measure = "ZCOR",      # Fisher's z-transformed correlation
+                           ri = r,                # column with the correlation
+                           ni = sample_size,      # column with the sample size
+                           data = corr_dat)
 
 # Add an ID number for each effect size (row 1, 2, 3, ...)
 corr_es$es_ID <- 1:nrow(corr_es)
@@ -122,7 +122,7 @@ head(corr_es[, c("es_ID", "species", "r", "sample_size", "yi", "vi")])
 ```{r}
 #| label: a1-compare
 # Read the Excel file (replace the path with the path to YOUR saved workbook)
-excel_corr <- read_excel(here::here("excel", "correlation_solution.xlsx"), sheet = "data")
+excel_corr <- readxl::read_excel(here::here("excel", "correlation_solution.xlsx"), sheet = "data")
 
 # Difference between R and Excel for every row
 diff_Zr <- corr_es$yi - excel_corr$Zr_excel
@@ -141,10 +141,10 @@ max(abs(diff_v))
 # Put the two sets of values side by side in one data frame, then plot
 compare_corr <- data.frame(Zr_excel = excel_corr$Zr_excel, Zr_R = corr_es$yi)
 
-ggplot(compare_corr, aes(x = Zr_excel, y = Zr_R)) +
-  geom_abline(slope = 1, intercept = 0, colour = pal["dark"], linetype = "dashed") +
-  geom_point(colour = pal["red"], size = 2, alpha = 0.7) +
-  labs(x = "Zr calculated in Excel", y = "Zr from metafor::escalc()")
+ggplot2::ggplot(compare_corr, ggplot2::aes(x = Zr_excel, y = Zr_R)) +
+  ggplot2::geom_abline(slope = 1, intercept = 0, colour = pal["dark"], linetype = "dashed") +
+  ggplot2::geom_point(colour = pal["red"], size = 2, alpha = 0.7) +
+  ggplot2::labs(x = "Zr calculated in Excel", y = "Zr from metafor::escalc()")
 ```
 
 **Do they match?** Yes. The differences are at the level of computer rounding (about 10^-15^). If yours do *not* match, the usual culprits are:
@@ -169,14 +169,14 @@ ggplot(compare_corr, aes(x = Zr_excel, y = Zr_R)) +
 #| fig-cap: "Forest plot of the 50 Zr effect sizes made with metafor::forest(), back-transformed to the correlation scale."
 #| fig-height: 9
 #| fig-width: 7
-forest(x = corr_es$yi,                                 # effect sizes
-       vi = corr_es$vi,                                # sampling variances
-       slab = paste(corr_es$species, corr_es$trait),   # label: species + trait
-       transf = tanh,                                  # show correlations (r), not Zr
-       order = order(corr_es$yi),                      # sort from smallest to largest
-       col = "#e12744",                                # colour of the points
-       xlab = "Correlation (r)",
-       cex = 0.6)                                      # text size
+metafor::forest(x = corr_es$yi,                                 # effect sizes
+                vi = corr_es$vi,                                # sampling variances
+                slab = paste(corr_es$species, corr_es$trait),   # label: species + trait
+                transf = tanh,                                  # show correlations (r), not Zr
+                order = order(corr_es$yi),                      # sort from smallest to largest
+                col = "#e12744",                                # colour of the points
+                xlab = "Correlation (r)",
+                cex = 0.6)                                      # text size
 ```
 
 **Optional: the same plot with ggplot2**
@@ -190,13 +190,13 @@ corr_es$lower <- corr_es$yi - 1.96 * sqrt(corr_es$vi)
 corr_es$upper <- corr_es$yi + 1.96 * sqrt(corr_es$vi)
 
 # 2. Plot: one row per effect size, sorted by yi using reorder()
-ggplot(corr_es, aes(x = yi, y = reorder(paste(es_ID, species), yi), colour = taxa)) +
-  geom_vline(xintercept = 0, colour = "grey50") +            # line of no effect
-  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0, orientation = "y") +
-  geom_point() +
-  scale_colour_manual(values = taxa_cols) +
-  labs(x = "Fisher's Zr (± 95% CI)", y = NULL, colour = NULL) +
-  theme(axis.text.y = element_text(size = 7))
+ggplot2::ggplot(corr_es, ggplot2::aes(x = yi, y = reorder(paste(es_ID, species), yi), colour = taxa)) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey50") +            # line of no effect
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = lower, xmax = upper), width = 0, orientation = "y") +
+  ggplot2::geom_point() +
+  ggplot2::scale_colour_manual(values = taxa_cols) +
+  ggplot2::labs(x = "Fisher's Zr (± 95% CI)", y = NULL, colour = NULL) +
+  ggplot2::theme(axis.text.y = ggplot2::element_text(size = 7))
 ```
 :::
 
@@ -219,8 +219,8 @@ sum(corr_es$lower > 0 | corr_es$upper < 0)
 corr_es$ci_width <- corr_es$upper - corr_es$lower
 
 corr_es %>%
-  select(species, sample_size, ci_width) %>%
-  arrange(desc(ci_width)) %>%   # widest first
+  dplyr::select(species, sample_size, ci_width) %>%
+  dplyr::arrange(dplyr::desc(ci_width)) %>%   # widest first
   head(5)
 ```
 The widest CIs belong to the studies with the **smallest sample sizes**, because $s^2_{Zr} = 1/(N-3)$ depends **only** on sample size.
@@ -284,14 +284,14 @@ A completed workbook is in `excel/contrast_solution.xlsx`.
 ```{r}
 #| label: a2-escalc
 # Calculate lnRR (yi) and its sampling variance (vi) for every row
-contrast_es <- escalc(measure = "ROM",          # log response ratio ('ratio of means')
-                      m1i = treatment_mean,     # group 1 = treatment (numerator)
-                      sd1i = treatment_sd,
-                      n1i = treatment_n,
-                      m2i = control_mean,       # group 2 = control (denominator)
-                      sd2i = control_sd,
-                      n2i = control_n,
-                      data = contrast_dat)
+contrast_es <- metafor::escalc(measure = "ROM",          # log response ratio ('ratio of means')
+                               m1i = treatment_mean,     # group 1 = treatment (numerator)
+                               sd1i = treatment_sd,
+                               n1i = treatment_n,
+                               m2i = control_mean,       # group 2 = control (denominator)
+                               sd2i = control_sd,
+                               n2i = control_n,
+                               data = contrast_dat)
 
 # Add an ID number for each effect size
 contrast_es$es_ID <- 1:nrow(contrast_es)
@@ -312,21 +312,21 @@ head(contrast_es[, c("es_ID", "species", "trait", "treatment_mean", "control_mea
 ```{r}
 #| label: a2-compare
 # Read the Excel file (replace the path with the path to YOUR saved workbook)
-excel_con <- read_excel(here::here("excel", "contrast_solution.xlsx"), sheet = "data")
+excel_con <- readxl::read_excel(here::here("excel", "contrast_solution.xlsx"), sheet = "data")
 
 # lnRR and its variance: largest difference between R and Excel
 max(abs(contrast_es$yi - excel_con$lnRR_excel))
 max(abs(contrast_es$vi - excel_con$v_lnRR_excel))
 
 # Extension: Hedges' g in R
-smd_r <- escalc(measure = "SMD",               # Hedges' g
-                m1i = treatment_mean,
-                sd1i = treatment_sd,
-                n1i = treatment_n,
-                m2i = control_mean,
-                sd2i = control_sd,
-                n2i = control_n,
-                data = contrast_dat)
+smd_r <- metafor::escalc(measure = "SMD",               # Hedges' g
+                         m1i = treatment_mean,
+                         sd1i = treatment_sd,
+                         n1i = treatment_n,
+                         m2i = control_mean,
+                         sd2i = control_sd,
+                         n2i = control_n,
+                         data = contrast_dat)
 
 max(abs(smd_r$yi - excel_con$SMD_excel))
 ```
@@ -350,15 +350,15 @@ max(abs(smd_r$yi - excel_con$SMD_excel))
 #| fig-cap: "Forest plot of the 50 lnRR effect sizes, back-transformed to % change (treatment vs control)."
 #| fig-height: 9
 #| fig-width: 7
-forest(x = contrast_es$yi,
-       vi = contrast_es$vi,
-       slab = paste(contrast_es$species, contrast_es$trait),   # label: species + trait
-       transf = function(x) 100 * (exp(x) - 1),                # lnRR -> % change
-       refline = 0,                                            # 0% = no change
-       order = order(contrast_es$yi),                          # sort by effect size
-       col = "#e12744",                                        # colour of the points
-       xlab = "% change with warming",
-       cex = 0.6)
+metafor::forest(x = contrast_es$yi,
+                vi = contrast_es$vi,
+                slab = paste(contrast_es$species, contrast_es$trait),   # label: species + trait
+                transf = function(x) 100 * (exp(x) - 1),                # lnRR -> % change
+                refline = 0,                                            # 0% = no change
+                order = order(contrast_es$yi),                          # sort by effect size
+                col = "#e12744",                                        # colour of the points
+                xlab = "% change with warming",
+                cex = 0.6)
 ```
 :::
 
@@ -376,7 +376,7 @@ forest(x = contrast_es$yi,
 
 # 1. Find the row with the largest lnRR
 biggest <- contrast_es %>%
-  filter(yi == max(yi))
+  dplyr::filter(yi == max(yi))
 
 biggest[, c("species", "trait", "yi")]
 
@@ -386,12 +386,12 @@ biggest[, c("species", "trait", "yi")]
 
 # 2. How many rows does each comparison_ID have?
 contrast_es %>%
-  count(comparison_ID)
+  dplyr::count(comparison_ID)
 
 # Look at one comparison with more than one row (here comparison 13, which has 3 rows)
 contrast_es %>%
-  filter(comparison_ID == 13) %>%
-  select(comparison_ID, control_mean, control_sd, control_n, treatment_mean, yi)
+  dplyr::filter(comparison_ID == 13) %>%
+  dplyr::select(comparison_ID, control_mean, control_sd, control_n, treatment_mean, yi)
 ```
 The **control group** (mean, SD, *N*) is identical in every row of the same comparison: several warmed groups were compared with **one shared control**. These effect sizes are therefore not independent. If the control mean happens to be low by chance, *all* lnRRs in that comparison are inflated together. We deal with this in [Activity 2](activity-2-multilevel.qmd).
 :::
@@ -416,16 +416,16 @@ In the printout, look for: `estimate` (the overall mean), `ci.lb` and `ci.ub` (i
 ```{r}
 #| label: a3-models
 # Fixed-effect model
-mod_fe <- rma(yi = yi,
-              vi = vi,
-              method = "EE",
-              data = contrast_es)
+mod_fe <- metafor::rma(yi = yi,
+                       vi = vi,
+                       method = "EE",
+                       data = contrast_es)
 
 # Random-effects model
-mod_re <- rma(yi = yi,
-              vi = vi,
-              method = "REML",
-              data = contrast_es)
+mod_re <- metafor::rma(yi = yi,
+                       vi = vi,
+                       method = "REML",
+                       data = contrast_es)
 
 mod_fe
 mod_re
@@ -464,11 +464,11 @@ model_compare
 #| fig-cap: "Overall estimates (± 95% CI) from the two models."
 #| fig-height: 2
 #| fig-width: 6
-ggplot(model_compare, aes(x = estimate, y = model)) +
-  geom_vline(xintercept = 0, colour = "grey60") +
-  geom_errorbar(aes(xmin = ci_lb, xmax = ci_ub), width = 0.15, orientation = "y") +
-  geom_point(shape = 18, size = 5, colour = pal["red"]) +
-  labs(x = "Overall lnRR (± 95% CI)", y = NULL)
+ggplot2::ggplot(model_compare, ggplot2::aes(x = estimate, y = model)) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey60") +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = ci_lb, xmax = ci_ub), width = 0.15, orientation = "y") +
+  ggplot2::geom_point(shape = 18, size = 5, colour = pal["red"]) +
+  ggplot2::labs(x = "Overall lnRR (± 95% CI)", y = NULL)
 ```
 
 **Optional: weights**
@@ -484,10 +484,10 @@ weights_dat <- data.frame(
   model     = rep(c("Fixed effect", "Random effects"), each = nrow(contrast_es))
 )
 
-ggplot(weights_dat, aes(x = precision, y = weight, colour = model)) +
-  geom_point(size = 2, alpha = 0.8) +
-  scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
-  labs(x = "Precision (1 / SE)", y = "Weight (%)")
+ggplot2::ggplot(weights_dat, ggplot2::aes(x = precision, y = weight, colour = model)) +
+  ggplot2::geom_point(size = 2, alpha = 0.8) +
+  ggplot2::scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
+  ggplot2::labs(x = "Precision (1 / SE)", y = "Weight (%)")
 ```
 :::
 

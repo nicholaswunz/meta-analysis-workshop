@@ -32,14 +32,14 @@ Run this chunk. It calculates lnRR exactly as in [Activity 1](activity-1-effect-
 contrast_dat <- read.csv(here::here("data", "sim_contrast.csv"))
 
 # lnRR (yi) and its sampling variance (vi), as in Activity 1
-contrast_es <- escalc(measure = "ROM",
-                      m1i = treatment_mean,     # group 1 = treatment
-                      sd1i = treatment_sd,
-                      n1i = treatment_n,
-                      m2i = control_mean,       # group 2 = control
-                      sd2i = control_sd,
-                      n2i = control_n,
-                      data = contrast_dat)
+contrast_es <- metafor::escalc(measure = "ROM",
+                               m1i = treatment_mean,     # group 1 = treatment
+                               sd1i = treatment_sd,
+                               n1i = treatment_n,
+                               m2i = control_mean,       # group 2 = control
+                               sd2i = control_sd,
+                               n2i = control_n,
+                               data = contrast_dat)
 
 contrast_es$es_ID <- 1:nrow(contrast_es)       # one ID per effect size
 contrast_es$phylo <- contrast_es$species       # copy of species for the phylogenetic effect
@@ -69,13 +69,13 @@ length(unique(contrast_es$comparison_ID))
 ## 💡 Solution
 ```{r}
 #| label: model1
-model1 <- rma.mv(yi = yi,
-                 V = vi,
-                 random = list(~ 1 | study_ID,   # between-study differences
-                               ~ 1 | es_ID),     # within-study differences
-                 test = "t",
-                 dfs = "contain",
-                 data = contrast_es)
+model1 <- metafor::rma.mv(yi = yi,
+                          V = vi,
+                          random = list(~ 1 | study_ID,   # between-study differences
+                                        ~ 1 | es_ID),     # within-study differences
+                          test = "t",
+                          dfs = "contain",
+                          data = contrast_es)
 
 summary(model1)
 
@@ -155,21 +155,21 @@ round(V[1:6, 1:6], 4)
 #| fig-cap: "The simulated vertebrate tree pruned to the species present in the contrast dataset. Branch lengths are approximate divergence times (Mya)."
 #| fig-height: 4.5
 # 1. Read the tree
-tree <- read.tree(here::here("data", "sim_tree.tre"))
+tree <- ape::read.tree(here::here("data", "sim_tree.tre"))
 
 # 2. Species in the data but not in the tree (must be empty!)
 setdiff(contrast_es$species, tree$tip.label)
 
 # 3. Keep only the species that are in the data
-tree <- keep.tip(tree, unique(contrast_es$species))
+tree <- ape::keep.tip(tree, unique(contrast_es$species))
 
 # 4. Phylogenetic correlation matrix
-A <- vcv(tree, corr = TRUE)
+A <- ape::vcv(tree, corr = TRUE)
 round(A[1:4, 1:4], 2)
 
 # 5. Plot the tree
 plot(tree, cex = 0.85, label.offset = 4)
-add.scale.bar(cex = 0.7)
+ape::add.scale.bar(cex = 0.7)
 ```
 :::
 
@@ -187,16 +187,16 @@ Save it as `model2` and print it. In the *Variance Components* table, the `R` co
 ## 💡 Solution
 ```{r}
 #| label: model2
-model2 <- rma.mv(yi = yi,
-                 V = V,                             # full V matrix instead of vi
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID,
-                               ~ 1 | species,       # non-phylogenetic species effect
-                               ~ 1 | phylo),        # phylogenetic effect
-                 R = list(phylo = A),               # link 'phylo' to the tree
-                 test = "t",
-                 dfs = "contain",
-                 data = contrast_es)
+model2 <- metafor::rma.mv(yi = yi,
+                          V = V,                             # full V matrix instead of vi
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID,
+                                        ~ 1 | species,       # non-phylogenetic species effect
+                                        ~ 1 | phylo),        # phylogenetic effect
+                          R = list(phylo = A),               # link 'phylo' to the tree
+                          test = "t",
+                          dfs = "contain",
+                          data = contrast_es)
 
 summary(model2)
 ```
@@ -250,7 +250,7 @@ H2
 ```{r}
 #| label: i2
 # 1. I2 with orchaRd
-i2_model2 <- i2_ml(model2)
+i2_model2 <- orchaRd::i2_ml(model2)
 i2_model2
 
 # 2. Sampling error share
@@ -292,13 +292,13 @@ i2_dat <- data.frame(
 i2_dat$component <- factor(i2_dat$component, levels = i2_dat$component)  # keep this order
 
 # A single stacked bar
-ggplot(i2_dat, aes(x = I2, y = "Model 2", fill = component)) +
-  geom_col(colour = "white") +
-  geom_text(aes(label = paste0(round(I2), "%")),
-            position = position_stack(vjust = 0.5),
-            colour = "white", fontface = "bold", size = 3.5) +
-  scale_fill_manual(values = unname(pal[c("dark", "darkred", "red", "orange", "grey")]), name = NULL) +
-  labs(x = "% of total variance", y = NULL)
+ggplot2::ggplot(i2_dat, ggplot2::aes(x = I2, y = "Model 2", fill = component)) +
+  ggplot2::geom_col(colour = "white") +
+  ggplot2::geom_text(ggplot2::aes(label = paste0(round(I2), "%")),
+                     position = ggplot2::position_stack(vjust = 0.5),
+                     colour = "white", fontface = "bold", size = 3.5) +
+  ggplot2::scale_fill_manual(values = unname(pal[c("dark", "darkred", "red", "orange", "grey")]), name = NULL) +
+  ggplot2::labs(x = "% of total variance", y = NULL)
 ```
 :::
 
@@ -345,23 +345,23 @@ Then compare with the example.
 #| label: fig-orchard-m2
 #| fig-cap: "Orchard plot of Model 2: overall mean lnRR (circle), 95% CI (thick bar), 95% prediction interval (thin bar), and individual effect sizes scaled by precision. k = effect sizes (number of studies in brackets)."
 #| fig-height: 3.5
-orchard_plot(model2,
-             mod = "1",               # overall mean (no moderator)
-             group = "study_ID",      # count the number of studies
-             xlab = "Log response ratio (lnRR)",
-             cb = FALSE)              # use the workshop's red colours
+orchaRd::orchard_plot(model2,
+                      mod = "1",               # overall mean (no moderator)
+                      group = "study_ID",      # count the number of studies
+                      xlab = "Log response ratio (lnRR)",
+                      cb = FALSE)              # use the workshop's red colours
 ```
 
 ```{r}
 #| label: fig-orchard-m2-pct
 #| fig-cap: "The same plot on the percentage-change scale."
 #| fig-height: 3.5
-orchard_plot(model2,
-             mod = "1",
-             group = "study_ID",
-             xlab = "Change in physiological rate with warming (%)",
-             transfm = "percentr",    # back-transform lnRR to % change
-             cb = FALSE)
+orchaRd::orchard_plot(model2,
+                      mod = "1",
+                      group = "study_ID",
+                      xlab = "Change in physiological rate with warming (%)",
+                      transfm = "percentr",    # back-transform lnRR to % change
+                      cb = FALSE)
 ```
 :::
 

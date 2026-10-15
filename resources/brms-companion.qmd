@@ -37,9 +37,9 @@ Weakly informative priors on the effect-size scale are sensible defaults for lnR
 ```{r}
 #| eval: false
 priors <- c(
-  prior(normal(0, 1),         class = "Intercept"),  # overall mean
-  prior(normal(0, 1),         class = "b"),          # moderators (meta-regression only)
-  prior(student_t(3, 0, 0.5), class = "sd")          # all random-effect SDs
+  brms::prior(normal(0, 1),         class = "Intercept"),  # overall mean
+  brms::prior(normal(0, 1),         class = "b"),          # moderators (meta-regression only)
+  brms::prior(student_t(3, 0, 0.5), class = "sd")          # all random-effect SDs
 )
 ```
 
@@ -47,11 +47,11 @@ priors <- c(
 
 ```{r}
 #| eval: false
-brm_m1 <- brm(yi | se(sqrt(vi)) ~ 1 + (1 | study_ID) + (1 | es_ID),
-              data = contrast_es, prior = priors[-2, ],
-              chains = 4, iter = 4000, warmup = 1000, seed = 2026,
-              control = list(adapt_delta = 0.95),
-              file = here::here("brms_fits", "brm_m1"))
+brm_m1 <- brms::brm(yi | se(sqrt(vi)) ~ 1 + (1 | study_ID) + (1 | es_ID),
+                    data = contrast_es, prior = priors[-2, ],
+                    chains = 4, iter = 4000, warmup = 1000, seed = 2026,
+                    control = list(adapt_delta = 0.95),
+                    file = here::here("brms_fits", "brm_m1"))
 summary(brm_m1)
 ```
 
@@ -61,13 +61,13 @@ summary(brm_m1)
 #| eval: false
 rownames(V) <- colnames(V) <- contrast_es$es_ID   # names must match the grouping levels
 
-brm_m2 <- brm(yi ~ 1 + (1 | study_ID) + (1 | es_ID) + (1 | species) +
-                (1 | gr(phylo, cov = A)) + fcor(V),
-              data = contrast_es, data2 = list(A = A, V = V),
-              prior = c(priors[-2, ], prior(constant(1), class = "sigma")),
-              chains = 4, iter = 6000, warmup = 2000, seed = 2026,
-              control = list(adapt_delta = 0.99, max_treedepth = 15),
-              file = here::here("brms_fits", "brm_m2"))
+brm_m2 <- brms::brm(yi ~ 1 + (1 | study_ID) + (1 | es_ID) + (1 | species) +
+                      (1 | gr(phylo, cov = A)) + fcor(V),
+                    data = contrast_es, data2 = list(A = A, V = V),
+                    prior = c(priors[-2, ], brms::prior(constant(1), class = "sigma")),
+                    chains = 4, iter = 6000, warmup = 2000, seed = 2026,
+                    control = list(adapt_delta = 0.99, max_treedepth = 15),
+                    file = here::here("brms_fits", "brm_m2"))
 
 # Posterior I2 for each component
 
@@ -78,7 +78,7 @@ v_typ <- (length(w) - 1) * sum(w) / (sum(w)^2 - sum(w^2))
 # Posterior draws of the random-effect SDs, squared to give variances
 post <- as.data.frame(brm_m2)
 sds  <- post %>%
-  select(starts_with("sd_"))
+  dplyr::select(dplyr::starts_with("sd_"))
 vars <- sds^2
 
 # I2 for every posterior draw, then summarise (median and 95% credible interval)
@@ -90,16 +90,16 @@ apply(I2, 2, quantile, probs = c(0.025, 0.5, 0.975))
 
 ```{r}
 #| eval: false
-brm_m3 <- brm(yi ~ sex + log_mass_c + inv_sqrt_n + year_c +
-                (1 | study_ID) + (1 | es_ID) + (1 | species) +
-                (1 | gr(phylo, cov = A)) + fcor(V),
-              data = contrast_es, data2 = list(A = A, V = V),
-              prior = c(priors, prior(constant(1), class = "sigma")),
-              chains = 4, iter = 6000, warmup = 2000, seed = 2026,
-              control = list(adapt_delta = 0.99, max_treedepth = 15),
-              file = here::here("brms_fits", "brm_m3"))
-fixef(brm_m3)
-conditional_effects(brm_m3, effects = "sex")
+brm_m3 <- brms::brm(yi ~ sex + log_mass_c + inv_sqrt_n + year_c +
+                      (1 | study_ID) + (1 | es_ID) + (1 | species) +
+                      (1 | gr(phylo, cov = A)) + fcor(V),
+                    data = contrast_es, data2 = list(A = A, V = V),
+                    prior = c(priors, brms::prior(constant(1), class = "sigma")),
+                    chains = 4, iter = 6000, warmup = 2000, seed = 2026,
+                    control = list(adapt_delta = 0.99, max_treedepth = 15),
+                    file = here::here("brms_fits", "brm_m3"))
+brms::fixef(brm_m3)
+brms::conditional_effects(brm_m3, effects = "sex")
 ```
 
 ## Meta-analysis of variability and location-scale models (Models 2–4)
@@ -107,26 +107,26 @@ conditional_effects(brm_m3, effects = "sex")
 ```{r}
 #| eval: false
 # Model 2: lnCVR
-brm_cvr <- brm(lnCVR | se(sqrt(v_lnCVR)) ~ 1 + (1 | study_ID) + (1 | es_ID),
-               data = ce, prior = priors[-2, ], file = here::here("brms_fits", "brm_cvr"))
+brm_cvr <- brms::brm(lnCVR | se(sqrt(v_lnCVR)) ~ 1 + (1 | study_ID) + (1 | es_ID),
+                     data = ce, prior = priors[-2, ], file = here::here("brms_fits", "brm_cvr"))
 
 # Model 3: location-scale for lnRR (moderator in both parts)
-brm_ls_lnRR <- brm(bf(lnRR | se(sqrt(v_lnRR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
-                      sigma ~ disp_mode),
-                   data = ce,
-                   prior = c(prior(normal(0, 1), class = "b"),
-                             prior(normal(0, 1), class = "b", dpar = "sigma"),
-                             prior(student_t(3, 0, 0.5), class = "sd")),
-                   file = here::here("brms_fits", "brm_ls_lnRR"))
+brm_ls_lnRR <- brms::brm(brms::bf(lnRR | se(sqrt(v_lnRR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
+                                  sigma ~ disp_mode),
+                         data = ce,
+                         prior = c(brms::prior(normal(0, 1), class = "b"),
+                                   brms::prior(normal(0, 1), class = "b", dpar = "sigma"),
+                                   brms::prior(student_t(3, 0, 0.5), class = "sd")),
+                         file = here::here("brms_fits", "brm_ls_lnRR"))
 
 # Model 4: location-scale for lnCVR
 brm_ls_lnCVR <- update(brm_ls_lnRR,
-                       formula. = bf(lnCVR | se(sqrt(v_lnCVR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
-                                     sigma ~ disp_mode),
+                       formula. = brms::bf(lnCVR | se(sqrt(v_lnCVR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
+                                           sigma ~ disp_mode),
                        newdata = ce, file = here::here("brms_fits", "brm_ls_lnCVR"))
 
 # Scale contrasts as multiplicative changes in heterogeneity SD
-scale_coefs <- as.data.frame(fixef(brm_ls_lnRR))
+scale_coefs <- as.data.frame(brms::fixef(brm_ls_lnRR))
 scale_coefs <- scale_coefs[startsWith(rownames(scale_coefs), "sigma_"), ]   # scale part only
 exp(scale_coefs[, c("Estimate", "Q2.5", "Q97.5")])
 ```
@@ -137,14 +137,14 @@ This uses `x_km` and `y_km`, which are calculated on the [phylogenetic and spati
 
 ```{r}
 #| eval: false
-brm_sp <- brm(bf(ARR | se(sqrt(V_ARR), sigma = TRUE) ~ lat_c + (1 | study_ID) +
-                   gp(x_km, y_km, cov = "exponential", scale = FALSE)),
-              data = arr_dat,
-              prior = c(prior(normal(0, 1), class = "b"),
-                        prior(student_t(3, 0, 0.5), class = "sd"),
-                        prior(student_t(3, 0, 0.5), class = "sdgp"),
-                        prior(lognormal(log(300), 1), class = "lscale")),
-              control = list(adapt_delta = 0.99), file = here::here("brms_fits", "brm_sp"))
+brm_sp <- brms::brm(brms::bf(ARR | se(sqrt(V_ARR), sigma = TRUE) ~ lat_c + (1 | study_ID) +
+                               gp(x_km, y_km, cov = "exponential", scale = FALSE)),
+                    data = arr_dat,
+                    prior = c(brms::prior(normal(0, 1), class = "b"),
+                              brms::prior(student_t(3, 0, 0.5), class = "sd"),
+                              brms::prior(student_t(3, 0, 0.5), class = "sdgp"),
+                              brms::prior(lognormal(log(300), 1), class = "lscale")),
+                    control = list(adapt_delta = 0.99), file = here::here("brms_fits", "brm_sp"))
 ```
 
 ## Checking a Bayesian meta-analysis
@@ -153,6 +153,6 @@ brm_sp <- brm(bf(ARR | se(sqrt(V_ARR), sigma = TRUE) ~ lat_c + (1 | study_ID) +
 #| eval: false
 summary(brm_m2)            # Rhat should be ~1.00; Bulk/Tail ESS > 400
 plot(brm_m2)               # trace plots: well-mixed 'hairy caterpillars'
-pp_check(brm_m2, ndraws = 100)
-prior_summary(brm_m2)      # always report the priors used
+brms::pp_check(brm_m2, ndraws = 100)
+brms::prior_summary(brm_m2)      # always report the priors used
 ```

@@ -77,36 +77,36 @@ We'll start again by loading the raw data and reconstructing the phylogenetic tr
 
 # Download the data and remove a column we don't need
 zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
-  select(-dispersal_def)
+  dplyr::select(-dispersal_def)
 
 # Give every effect size (row) its own ID
 zr_data$es_ID <- 1:nrow(zr_data)
 
 # Make the OTL species names consistent: replace any underscores with spaces
-zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, "_", " ")
+zr_data$species_OTL <- stringr::str_replace_all(zr_data$species_OTL, "_", " ")
 
 # Calculate Zr and its sampling variance
-zr_data <- escalc(measure = "ZCOR",
-                  ri = corr_coeff,
-                  ni = sample_size,
-                  data = zr_data,
-                  var.names = c("Zr", "V_Zr"))
+zr_data <- metafor::escalc(measure = "ZCOR",
+                           ri = corr_coeff,
+                           ni = sample_size,
+                           data = zr_data,
+                           var.names = c("Zr", "V_Zr"))
 
 # Match species names to the Open Tree of Life and download the tree
 species <- sort(unique(zr_data$species_OTL))
-taxa    <- tnrs_match_names(names = species)
-tree    <- tol_induced_subtree(ott_ids = ott_id(taxa), label_format = "name")
+taxa    <- rotl::tnrs_match_names(names = species)
+tree    <- rotl::tol_induced_subtree(ott_ids = rotl::ott_id(taxa), label_format = "name")
 
 # Add branch lengths and randomly resolve polytomies
 set.seed(1)
-tree <- compute.brlen(tree, method = "Grafen", power = 1)
-tree <- multi2di(tree, random = TRUE)
+tree <- ape::compute.brlen(tree, method = "Grafen", power = 1)
+tree <- ape::multi2di(tree, random = TRUE)
 
 # Phylogenetic correlation matrix
-phylo_cor <- vcv(tree, corr = TRUE)
+phylo_cor <- ape::vcv(tree, corr = TRUE)
 
 # Add underscores to the OTL species names so they match the tree tip labels
-zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, " ", "_")
+zr_data$species_OTL <- stringr::str_replace_all(zr_data$species_OTL, " ", "_")
 ```
 
 ## Fit the phylogenetic meta-regression model
@@ -120,18 +120,18 @@ We can now fit our multilevel meta-regression model, including the `disp_trait` 
 #| echo: true
 
 # Phylogenetic meta-regression: one mean per behavioural trait (no intercept)
-trait_model <- rma.mv(yi = Zr,
-                      V = V_Zr,
-                      mods = ~ -1 + disp_trait,             # moderator, intercept removed
-                      random = list(~ 1 | study_ID,
-                                    ~ 1 | es_ID,
-                                    ~ 1 | species,
-                                    ~ 1 | species_OTL),
-                      R = list(species_OTL = phylo_cor),
-                      method = "REML",
-                      test = "t",
-                      dfs = "contain",
-                      data = zr_data)
+trait_model <- metafor::rma.mv(yi = Zr,
+                               V = V_Zr,
+                               mods = ~ -1 + disp_trait,             # moderator, intercept removed
+                               random = list(~ 1 | study_ID,
+                                             ~ 1 | es_ID,
+                                             ~ 1 | species,
+                                             ~ 1 | species_OTL),
+                               R = list(species_OTL = phylo_cor),
+                               method = "REML",
+                               test = "t",
+                               dfs = "contain",
+                               data = zr_data)
 
 summary(trait_model)
 ```
@@ -161,18 +161,18 @@ You might have noticed that we suppressed the intercept in this model (i.e., `-1
 #| echo: true
 
 # The same model, but with the intercept (Activity = the reference level)
-trait_model_contrast <- rma.mv(yi = Zr,
-                               V = V_Zr,
-                               mods = ~ disp_trait,         # moderator, with intercept
-                               random = list(~ 1 | study_ID,
-                                             ~ 1 | es_ID,
-                                             ~ 1 | species,
-                                             ~ 1 | species_OTL),
-                               R = list(species_OTL = phylo_cor),
-                               method = "REML",
-                               test = "t",
-                               dfs = "contain",
-                               data = zr_data)
+trait_model_contrast <- metafor::rma.mv(yi = Zr,
+                                        V = V_Zr,
+                                        mods = ~ disp_trait,         # moderator, with intercept
+                                        random = list(~ 1 | study_ID,
+                                                      ~ 1 | es_ID,
+                                                      ~ 1 | species,
+                                                      ~ 1 | species_OTL),
+                                        R = list(species_OTL = phylo_cor),
+                                        method = "REML",
+                                        test = "t",
+                                        dfs = "contain",
+                                        data = zr_data)
 
 summary(trait_model_contrast)
 ```
@@ -207,13 +207,13 @@ For the `intrcpt`, the null hypothesis being tested is that the mean is zero. In
 #| fig-align: center
 #| fig-cap: "Orchard plot of the mean correlation coefficient between physiology and activity, dispersal and exploration. *k* indicates the number of effect sizes (studies in brackets). Thick black bars are 95% confidence intervals and the thin bars ('twigs') are 95% prediction intervals."
 
-orchard_plot(trait_model,
-             mod = "disp_trait",          # one 'branch' per behavioural trait
-             group = "study_ID",          # count the number of studies
-             xlab = "Correlation coefficient (r)",
-             transfm = "tanh",            # back-transform Zr to r
-             angle = 45,                  # angle of the y-axis labels
-             cb = FALSE)                  # use the workshop's red colours
+orchaRd::orchard_plot(trait_model,
+                      mod = "disp_trait",          # one 'branch' per behavioural trait
+                      group = "study_ID",          # count the number of studies
+                      xlab = "Correlation coefficient (r)",
+                      transfm = "tanh",            # back-transform Zr to r
+                      angle = 45,                  # angle of the y-axis labels
+                      cb = FALSE)                  # use the workshop's red colours
 ```
 
 
@@ -237,9 +237,9 @@ We build a phylogenetic model of dive duration ($lnRR_{Q_{10}}$) from @Rodgers20
 dive <- read.csv("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/contrast_lab_dataset.csv")
 
 # 2. Tidy the species names so they match the tree tip labels -------------
-dive$species <- str_trim(dive$species)                    # remove extra spaces
-dive$species <- str_replace_all(dive$species, " ", "_")   # spaces -> underscores
-dive$species <- str_replace(dive$species, "Trachemys_scripta_elegans", "Trachemys_scripta")
+dive$species <- stringr::str_trim(dive$species)                    # remove extra spaces
+dive$species <- stringr::str_replace_all(dive$species, " ", "_")   # spaces -> underscores
+dive$species <- stringr::str_replace(dive$species, "Trachemys_scripta_elegans", "Trachemys_scripta")
 
 # A second copy of species for the phylogenetic random effect
 dive$phylo <- dive$species
@@ -292,10 +292,10 @@ for (i in 1:k) {
 }
 
 # 6. Phylogeny ------------------------------------------------------------
-tree <- read.tree("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/phylo_lab.nwk")
+tree <- ape::read.tree("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/phylo_lab.nwk")
 
-tree <- keep.tip(tree, unique(dive$species))   # keep only the species in our data
-A <- vcv(tree, corr = TRUE)                     # phylogenetic correlation matrix
+tree <- ape::keep.tip(tree, unique(dive$species))   # keep only the species in our data
+A <- ape::vcv(tree, corr = TRUE)                     # phylogenetic correlation matrix
 
 # The random effects, saved once so we can reuse them in every model below
 rand <- list(~ 1 | study_ID,
@@ -310,21 +310,21 @@ Always look at the moderators first:
 #| label: explore
 # How many effect sizes are there for each respiration mode and taxonomic order?
 dive %>%
-  count(respiration_mode, order)
+  dplyr::count(respiration_mode, order)
 ```
 
 ## A categorical moderator – respiration mode
 
 ```{r}
 #| label: mr-resp
-mr_resp <- rma.mv(yi = lnRR_Q10,
-                  V = V_dive,                    # sampling (co)variance matrix
-                  mods = ~ respiration_mode,     # reference level = "aerial" (alphabetical)
-                  random = rand,
-                  R = list(phylo = A),           # phylogenetic correlation matrix
-                  test = "t",
-                  dfs = "contain",
-                  data = dive)
+mr_resp <- metafor::rma.mv(yi = lnRR_Q10,
+                           V = V_dive,                    # sampling (co)variance matrix
+                           mods = ~ respiration_mode,     # reference level = "aerial" (alphabetical)
+                           random = rand,
+                           R = list(phylo = A),           # phylogenetic correlation matrix
+                           test = "t",
+                           dfs = "contain",
+                           data = dive)
 
 summary(mr_resp)
 ```
@@ -341,14 +341,14 @@ To get the **mean of each group** directly, remove the intercept (`- 1`) or use 
 ```{r}
 #| label: group-means
 # Option 1: refit the model without the intercept
-mr_resp_means <- rma.mv(yi = lnRR_Q10,
-                        V = V_dive,
-                        mods = ~ respiration_mode - 1,   # '- 1' removes the intercept
-                        random = rand,
-                        R = list(phylo = A),
-                        test = "t",
-                        dfs = "contain",
-                        data = dive)
+mr_resp_means <- metafor::rma.mv(yi = lnRR_Q10,
+                                 V = V_dive,
+                                 mods = ~ respiration_mode - 1,   # '- 1' removes the intercept
+                                 random = rand,
+                                 R = list(phylo = A),
+                                 test = "t",
+                                 dfs = "contain",
+                                 data = dive)
 
 # The group means, and back-transformed to Q10 with exp()
 group_means <- data.frame(estimate = mr_resp_means$b[, 1],
@@ -358,7 +358,7 @@ group_means$Q10 <- exp(group_means$estimate)
 group_means
 
 # Option 2: mod_results() gives the same group means, plus prediction intervals
-res_resp <- mod_results(mr_resp, mod = "respiration_mode", group = "study_ID")
+res_resp <- orchaRd::mod_results(mr_resp, mod = "respiration_mode", group = "study_ID")
 res_resp$mod_table
 ```
 
@@ -371,25 +371,25 @@ With `- 1` the omnibus test asks "are *all* group means zero?", not "do groups *
 #| label: fig-orchard-resp
 #| fig-cap: "Orchard plot by respiration mode: group means (circles) with 95% CIs (thick bars) and prediction intervals (thin bars), effect sizes scaled by precision."
 #| fig-height: 4
-orchard_plot(mr_resp,
-             mod = "respiration_mode",    # one 'branch' per respiration mode
-             group = "study_ID",          # count the number of studies
-             xlab = "lnRR_Q10 (dive duration)",
-             cb = FALSE)                  # use the workshop's red colours
+orchaRd::orchard_plot(mr_resp,
+                      mod = "respiration_mode",    # one 'branch' per respiration mode
+                      group = "study_ID",          # count the number of studies
+                      xlab = "lnRR_Q10 (dive duration)",
+                      cb = FALSE)                  # use the workshop's red colours
 ```
 
 ## A continuous moderator – body mass
 
 ```{r}
 #| label: mr-mass
-mr_mass <- rma.mv(yi = lnRR_Q10,
-                  V = V_dive,
-                  mods = ~ log_mass_c,           # centred log10 body mass
-                  random = rand,
-                  R = list(phylo = A),
-                  test = "t",
-                  dfs = "contain",
-                  data = dive)
+mr_mass <- metafor::rma.mv(yi = lnRR_Q10,
+                           V = V_dive,
+                           mods = ~ log_mass_c,           # centred log10 body mass
+                           random = rand,
+                           R = list(phylo = A),
+                           test = "t",
+                           dfs = "contain",
+                           data = dive)
 
 summary(mr_mass)
 ```
@@ -400,33 +400,33 @@ The slope is the change in $lnRR_{Q_{10}}$ per 10-fold increase in body mass (be
 #| label: fig-bubble
 #| fig-cap: "Bubble plot of lnRR_Q10 against log10 body mass. Bubble size is precision; the line is the meta-regression slope with its 95% CI (dashed) and prediction interval (dotted)."
 #| fig-height: 3
-bubble_plot(mr_mass,
-            mod = "log_mass_c",                     # the continuous moderator
-            group = "study_ID",                     # count the number of studies
-            xlab = "log10 body mass (g), centred",
-            ylab = "lnRR_Q10",
-            legend.pos = "top.left",
-            est.col = "#e12744")                    # colour of the regression line
+orchaRd::bubble_plot(mr_mass,
+                     mod = "log_mass_c",                     # the continuous moderator
+                     group = "study_ID",                     # count the number of studies
+                     xlab = "log10 body mass (g), centred",
+                     ylab = "lnRR_Q10",
+                     legend.pos = "top.left",
+                     est.col = "#e12744")                    # colour of the regression line
 ```
 
 ## Several moderators and $R^2$
 
 ```{r}
 #| label: mr-both
-mr_both <- rma.mv(yi = lnRR_Q10,
-                  V = V_dive,
-                  mods = ~ respiration_mode + log_mass_c,   # two moderators
-                  random = rand,
-                  R = list(phylo = A),
-                  test = "t",
-                  dfs = "contain",
-                  data = dive)
+mr_both <- metafor::rma.mv(yi = lnRR_Q10,
+                           V = V_dive,
+                           mods = ~ respiration_mode + log_mass_c,   # two moderators
+                           random = rand,
+                           R = list(phylo = A),
+                           test = "t",
+                           dfs = "contain",
+                           data = dive)
 
 summary(mr_both)
 
 # Marginal R2: variance explained by the moderators
 # Conditional R2: variance explained by the moderators and random effects
-r2_ml(mr_both)
+orchaRd::r2_ml(mr_both)
 ```
 
 Marginal $R^2$ [@NakagawaSchielzeth2013] is the proportion of the total variance (excluding sampling variance) explained by the fixed effects (moderators).

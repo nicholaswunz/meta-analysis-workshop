@@ -36,22 +36,22 @@ Observed effect sizes vary for two reasons:
 set.seed(3)
 k <- 15
 
-het_demo <- tibble(study = 1:k,
-                   vi = runif(k, 0.004, 0.02)) %>%   # sampling variances
-  mutate(`No heterogeneity (τ = 0)`      = 0.3 + rnorm(k, 0, sqrt(vi)),
-         `High heterogeneity (τ = 0.25)` = 0.3 + rnorm(k, 0, 0.25) + rnorm(k, 0, sqrt(vi))) %>%
-  pivot_longer(cols = -c(study, vi), names_to = "scenario", values_to = "yi") %>%
-  mutate(scenario = fct_rev(scenario),            # show 'No heterogeneity' first
-         lower = yi - 1.96 * sqrt(vi),            # 95% CI of each effect size
-         upper = yi + 1.96 * sqrt(vi))
+het_demo <- tibble::tibble(study = 1:k,
+                           vi = runif(k, 0.004, 0.02)) %>%   # sampling variances
+  dplyr::mutate(`No heterogeneity (τ = 0)`      = 0.3 + rnorm(k, 0, sqrt(vi)),
+                `High heterogeneity (τ = 0.25)` = 0.3 + rnorm(k, 0, 0.25) + rnorm(k, 0, sqrt(vi))) %>%
+  tidyr::pivot_longer(cols = -c(study, vi), names_to = "scenario", values_to = "yi") %>%
+  dplyr::mutate(scenario = forcats::fct_rev(scenario),            # show 'No heterogeneity' first
+                lower = yi - 1.96 * sqrt(vi),            # 95% CI of each effect size
+                upper = yi + 1.96 * sqrt(vi))
 
-ggplot(het_demo, aes(x = yi, y = study)) +
-  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
-  geom_errorbar(aes(xmin = lower, xmax = upper),
-                width = 0, orientation = "y", colour = "grey50") +
-  geom_point(colour = pal["red"], size = 2.3) +
-  facet_wrap(~ scenario) +
-  labs(x = "Effect size", y = "Study")
+ggplot2::ggplot(het_demo, ggplot2::aes(x = yi, y = study)) +
+  ggplot2::geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = lower, xmax = upper),
+                         width = 0, orientation = "y", colour = "grey50") +
+  ggplot2::geom_point(colour = pal["red"], size = 2.3) +
+  ggplot2::facet_wrap(~ scenario) +
+  ggplot2::labs(x = "Effect size", y = "Study")
 ```
 
 The most commonly encountered measures of heterogeneity in comparative physiology, and indeed ecology and evolution more generally, are the results of *Q*-tests, $I^2$ metrics (or raw $\tau^2$ or variance estimates) and, less commonly, prediction intervals.
@@ -81,26 +81,26 @@ To illustrate our points, we will use the two multilevel models developed in the
 
 # Download the data and keep only the effect sizes for metabolic traits
 wu_met <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
-  filter(trait == "Metabolism")
+  dplyr::filter(trait == "Metabolism")
 
 # Give every effect size its own ID
 wu_met$es_ID <- 1:nrow(wu_met)
 
 # Calculate Zr (yi) and its sampling variance (vi)
-wu_met <- escalc(measure = "ZCOR",
-                 ri = corr_coeff,
-                 ni = sample_size,
-                 data = wu_met)
+wu_met <- metafor::escalc(measure = "ZCOR",
+                          ri = corr_coeff,
+                          ni = sample_size,
+                          data = wu_met)
 
 # Multilevel meta-analytic model
-mod_ml <- rma.mv(yi = yi,
-                 V = vi,
-                 random = list(~ 1 | study_ID,    # between-study random effect
-                               ~ 1 | es_ID),      # within-study (effect size) random effect
-                 method = "REML",
-                 test = "t",
-                 dfs = "contain",
-                 data = wu_met)
+mod_ml <- metafor::rma.mv(yi = yi,
+                          V = vi,
+                          random = list(~ 1 | study_ID,    # between-study random effect
+                                        ~ 1 | es_ID),      # within-study (effect size) random effect
+                          method = "REML",
+                          test = "t",
+                          dfs = "contain",
+                          data = wu_met)
 ```
 
 ```{r}
@@ -129,18 +129,18 @@ asr_dat <- cbind(asr_dat, arr_es)
 
 # Keep only the effect sizes for females
 asr_dat <- asr_dat %>%
-  filter(sex == "female")
+  dplyr::filter(sex == "female")
 
 # Multilevel meta-analytic model
-MLMA <- rma.mv(yi = ARR,
-               V = V_ARR,
-               random = list(~ 1 | species_ID,
-                             ~ 1 | study_ID,
-                             ~ 1 | es_ID),
-               method = "REML",
-               test = "t",
-               dfs = "contain",
-               data = asr_dat)
+MLMA <- metafor::rma.mv(yi = ARR,
+                        V = V_ARR,
+                        random = list(~ 1 | species_ID,
+                                      ~ 1 | study_ID,
+                                      ~ 1 | es_ID),
+                        method = "REML",
+                        test = "t",
+                        dfs = "contain",
+                        data = asr_dat)
 ```
 
 ::: {.panel-tabset}
@@ -195,7 +195,7 @@ I2_es    <- 100 * sigma2_es / total_var
 c(I2_total = I2_total, I2_study = I2_study, I2_es = I2_es)
 
 # The same with orchaRd
-i2_ml(mod_ml)
+orchaRd::i2_ml(mod_ml)
 ```
 
 Rough benchmarks: 25% low, 50% moderate, 75% high. In ecology and evolution, the *median* $I^2$ is ~92% [@Senior2016] – very high heterogeneity is the norm, not an anomaly.
@@ -236,7 +236,7 @@ There are also times when we may want to estimate, and present, the uncertainty 
 
 # Bootstrap the I2 estimates 1,000 times to get 95% confidence intervals
 set.seed(123)   # makes the bootstrap reproducible
-i2_boot <- i2_ml(mod_ml, boot = 1000)
+i2_boot <- orchaRd::i2_ml(mod_ml, boot = 1000)
 i2_boot
 
 ```
@@ -263,8 +263,8 @@ where $\hat{\mu}$ is the meta-analytic mean and $\sum \sigma^2$ is the sum of al
 #| label: cvhm
 #| echo: true
 
-cvh2_ml(MLMA)   # mean-standardised heterogeneity (variance scale)
-m2_ml(MLMA)     # heterogeneity as a fraction of the total 'signal'
+orchaRd::cvh2_ml(MLMA)   # mean-standardised heterogeneity (variance scale)
+orchaRd::m2_ml(MLMA)     # heterogeneity as a fraction of the total 'signal'
 ```
 
 #### Interpreting $CVH_2$ and $M_2$
@@ -347,31 +347,31 @@ c(lower = pi_study_lb, upper = pi_study_ub)
 # Distribution of true effects: mean = overall Zr, SD = sqrt(sum of variance components)
 total_sd <- sqrt(sum(mod_ml$sigma2))
 
-true_effects <- tibble(Zr = seq(-1.5, 1.5, by = 0.01)) %>%
-  mutate(density = dnorm(Zr, mean = mod_ml$b[1], sd = total_sd),
-         r = tanh(Zr))   # back-transform to r for plotting
+true_effects <- tibble::tibble(Zr = seq(-1.5, 1.5, by = 0.01)) %>%
+  dplyr::mutate(density = dnorm(Zr, mean = mod_ml$b[1], sd = total_sd),
+                r = tanh(Zr))   # back-transform to r for plotting
 
 # Back-transform the mean, CI and PI to r
-intervals <- tibble(mean = tanh(pred$pred),
-                    ci_lb = tanh(pred$ci.lb), ci_ub = tanh(pred$ci.ub),
-                    pi_lb = tanh(pred$pi.lb), pi_ub = tanh(pred$pi.ub))
+intervals <- tibble::tibble(mean = tanh(pred$pred),
+                            ci_lb = tanh(pred$ci.lb), ci_ub = tanh(pred$ci.ub),
+                            pi_lb = tanh(pred$pi.lb), pi_ub = tanh(pred$pi.ub))
 
-ggplot() +
-  geom_area(data = true_effects, aes(x = r, y = density),
-            fill = pal["light"], alpha = 0.8) +
-  geom_vline(xintercept = 0, colour = "grey60") +
+ggplot2::ggplot() +
+  ggplot2::geom_area(data = true_effects, ggplot2::aes(x = r, y = density),
+                     fill = pal["light"], alpha = 0.8) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey60") +
   # thin bar = 95% prediction interval
-  geom_errorbar(data = intervals, aes(y = -0.15, xmin = pi_lb, xmax = pi_ub),
-                width = 0.12, orientation = "y", colour = pal["dark"]) +
+  ggplot2::geom_errorbar(data = intervals, ggplot2::aes(y = -0.15, xmin = pi_lb, xmax = pi_ub),
+                         width = 0.12, orientation = "y", colour = pal["dark"]) +
   # thick bar = 95% confidence interval
-  geom_errorbar(data = intervals, aes(y = -0.15, xmin = ci_lb, xmax = ci_ub),
-                width = 0, linewidth = 3, orientation = "y", colour = pal["red"]) +
-  geom_point(data = intervals, aes(x = mean, y = -0.15), size = 3, colour = pal["dark"]) +
-  geom_text(data = intervals, aes(x = pi_ub, y = -0.32), label = "95% PI (thin)",
-            hjust = 1, size = 3.3, colour = pal["dark"]) +
-  geom_text(data = intervals, aes(x = pi_lb, y = -0.32), label = "95% CI (thick) of the mean",
-            hjust = 0, size = 3.3, colour = pal["red"]) +
-  labs(x = "Correlation (r)", y = "Density of true effects")
+  ggplot2::geom_errorbar(data = intervals, ggplot2::aes(y = -0.15, xmin = ci_lb, xmax = ci_ub),
+                         width = 0, linewidth = 3, orientation = "y", colour = pal["red"]) +
+  ggplot2::geom_point(data = intervals, ggplot2::aes(x = mean, y = -0.15), size = 3, colour = pal["dark"]) +
+  ggplot2::geom_text(data = intervals, ggplot2::aes(x = pi_ub, y = -0.32), label = "95% PI (thin)",
+                     hjust = 1, size = 3.3, colour = pal["dark"]) +
+  ggplot2::geom_text(data = intervals, ggplot2::aes(x = pi_lb, y = -0.32), label = "95% CI (thick) of the mean",
+                     hjust = 0, size = 3.3, colour = pal["red"]) +
+  ggplot2::labs(x = "Correlation (r)", y = "Density of true effects")
 ```
 
 # Cochran's Q
@@ -440,8 +440,8 @@ Note that this formula does not include $\sigma^2_{m}$, as the sampling error va
 
 ```{r}
 #| label: pluralistic
-cvh2_ml(mod_ml)   # heterogeneity relative to the mean
-m2_ml(mod_ml)     # heterogeneity as a share of the total signal
+orchaRd::cvh2_ml(mod_ml)   # heterogeneity relative to the mean
+orchaRd::m2_ml(mod_ml)     # heterogeneity as a share of the total signal
 ```
 :::
 
@@ -462,12 +462,12 @@ The `orchaRd` package provides the `orchard_plot()` function, which is a great t
 #| label: fig-orchard
 #| fig-cap: "Orchard plot of the multilevel model Zr. k = number of effect sizes; the number in brackets is the number of studies."
 #| fig-height: 3.6
-orchard_plot(mod_ml,
-             mod = "1",              # "1" = overall mean (no moderator)
-             group = "study_ID",     # used to count the number of studies
-             xlab = "Fisher's Zr",
-             transfm = "none",       # keep the effect sizes on the Zr scale
-             cb = FALSE)             # use the workshop's red colours
+orchaRd::orchard_plot(mod_ml,
+                      mod = "1",              # "1" = overall mean (no moderator)
+                      group = "study_ID",     # used to count the number of studies
+                      xlab = "Fisher's Zr",
+                      transfm = "none",       # keep the effect sizes on the Zr scale
+                      cb = FALSE)             # use the workshop's red colours
 ```
 
 Here is one for the `MLMA` model of the ARR data set (@fig-orchardARR). It shows that the mean ARR of female ectotherms is significantly greater than zero, but also a wide prediction interval, which immediately makes clear that there is substantial heterogeneity in ARR across species – the spread of effects is far greater than sampling error alone would produce.
@@ -481,11 +481,11 @@ Here is one for the `MLMA` model of the ARR data set (@fig-orchardARR). It shows
 #| fig-align: center
 #| fig-cap: "Orchard plot of acclimation response ratio (ARR) estimates across ectotherm species. The filled circle is the meta-analytic mean, the thick bar is the 95% confidence interval, and the thin bar is the 95% prediction interval. Individual effect sizes are scaled by precision."
 
-orchard_plot(MLMA,
-             mod = "1",               # overall mean (no moderator)
-             group = "species_ID",    # count the number of species
-             xlab = "Acclimation response ratio (ARR, °C / °C)",
-             cb = FALSE)              # use the workshop's red colours
+orchaRd::orchard_plot(MLMA,
+                      mod = "1",               # overall mean (no moderator)
+                      group = "species_ID",    # count the number of species
+                      xlab = "Acclimation response ratio (ARR, °C / °C)",
+                      cb = FALSE)              # use the workshop's red colours
 ```
 
 
@@ -502,38 +502,38 @@ orchard_plot(MLMA,
 
 # 1. Download the data and keep only the dispersal effect sizes
 wu_disp <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
-  filter(disp_trait == "Dispersal")
+  dplyr::filter(disp_trait == "Dispersal")
 
 # Effect size IDs, then Zr and its sampling variance
 wu_disp$es_ID <- 1:nrow(wu_disp)
 
-wu_disp <- escalc(measure = "ZCOR",
-                  ri = corr_coeff,
-                  ni = sample_size,
-                  data = wu_disp)
+wu_disp <- metafor::escalc(measure = "ZCOR",
+                           ri = corr_coeff,
+                           ni = sample_size,
+                           data = wu_disp)
 
 # Multilevel model
-mod_disp <- rma.mv(yi = yi,
-                   V = vi,
-                   random = list(~ 1 | study_ID,
-                                 ~ 1 | es_ID),
-                   test = "t",
-                   dfs = "contain",
-                   data = wu_disp)
+mod_disp <- metafor::rma.mv(yi = yi,
+                            V = vi,
+                            random = list(~ 1 | study_ID,
+                                          ~ 1 | es_ID),
+                            test = "t",
+                            dfs = "contain",
+                            data = wu_disp)
 
 # I2 estimates
-i2_ml(mod_disp)
+orchaRd::i2_ml(mod_disp)
 
 # Mean, CI and PI, back-transformed to r with tanh
 predict(mod_disp, transf = tanh)
 
 # 2. Orchard plot on the correlation scale
-orchard_plot(mod_disp,
-             mod = "1",
-             group = "study_ID",
-             xlab = "Correlation (r)",
-             transfm = "tanh",
-             cb = FALSE)
+orchaRd::orchard_plot(mod_disp,
+                      mod = "1",
+                      group = "study_ID",
+                      xlab = "Correlation (r)",
+                      transfm = "tanh",
+                      cb = FALSE)
 ```
 :::
 

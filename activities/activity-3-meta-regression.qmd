@@ -34,14 +34,14 @@ Run this chunk. It repeats the preparation from [Activity 2](activity-2-multilev
 contrast_dat <- read.csv(here::here("data", "sim_contrast.csv"))
 
 # lnRR and its sampling variance
-contrast_es <- escalc(measure = "ROM",
-                      m1i = treatment_mean,     # group 1 = treatment
-                      sd1i = treatment_sd,
-                      n1i = treatment_n,
-                      m2i = control_mean,       # group 2 = control
-                      sd2i = control_sd,
-                      n2i = control_n,
-                      data = contrast_dat)
+contrast_es <- metafor::escalc(measure = "ROM",
+                               m1i = treatment_mean,     # group 1 = treatment
+                               sd1i = treatment_sd,
+                               n1i = treatment_n,
+                               m2i = control_mean,       # group 2 = control
+                               sd2i = control_sd,
+                               n2i = control_n,
+                               data = contrast_dat)
 
 contrast_es$es_ID <- 1:nrow(contrast_es)       # one ID per effect size
 contrast_es$phylo <- contrast_es$species       # copy of species for the phylogenetic effect
@@ -72,9 +72,9 @@ for (i in 1:k) {
 }
 
 # Phylogenetic correlation matrix (same as Activity 2)
-tree <- read.tree(here::here("data", "sim_tree.tre"))
-tree <- keep.tip(tree, unique(contrast_es$species))
-A <- vcv(tree, corr = TRUE)
+tree <- ape::read.tree(here::here("data", "sim_tree.tre"))
+tree <- ape::keep.tip(tree, unique(contrast_es$species))
+A <- ape::vcv(tree, corr = TRUE)
 ```
 
 ---
@@ -89,16 +89,16 @@ A <- vcv(tree, corr = TRUE)
 ## 💡 Solution
 ```{r}
 #| label: model1
-model1 <- rma.mv(yi = yi,
-                 V = V,                         # shared-control V matrix
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID,
-                               ~ 1 | species,
-                               ~ 1 | phylo),
-                 R = list(phylo = A),           # phylogenetic correlation matrix
-                 test = "t",
-                 dfs = "contain",
-                 data = contrast_es)
+model1 <- metafor::rma.mv(yi = yi,
+                          V = V,                         # shared-control V matrix
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID,
+                                        ~ 1 | species,
+                                        ~ 1 | phylo),
+                          R = list(phylo = A),           # phylogenetic correlation matrix
+                          test = "t",
+                          dfs = "contain",
+                          data = contrast_es)
 
 summary(model1)
 ```
@@ -130,18 +130,18 @@ summary(model1)
 #| fig-width: 9
 # 1. Look at the data
 contrast_es %>%
-  count(sex)
+  dplyr::count(sex)
 
 # Boxplot of lnRR by sex
-p1 <- ggplot(contrast_es, aes(x = sex, y = yi)) +
-  geom_boxplot(fill = "#fecdd0", outlier.shape = NA) +   # hide outlier dots (all points are drawn below)
-  geom_point(alpha = 0.6, colour = pal["red"]) +
-  labs(x = NULL, y = "lnRR")
+p1 <- ggplot2::ggplot(contrast_es, ggplot2::aes(x = sex, y = yi)) +
+  ggplot2::geom_boxplot(fill = "#fecdd0", outlier.shape = NA) +   # hide outlier dots (all points are drawn below)
+  ggplot2::geom_point(alpha = 0.6, colour = pal["red"]) +
+  ggplot2::labs(x = NULL, y = "lnRR")
 
 # Scatterplot of lnRR against body mass
-p2 <- ggplot(contrast_es, aes(x = log_mass, y = yi)) +
-  geom_point(alpha = 0.6, colour = pal["red"]) +
-  labs(x = "log10 body mass (g)", y = "lnRR")
+p2 <- ggplot2::ggplot(contrast_es, ggplot2::aes(x = log_mass, y = yi)) +
+  ggplot2::geom_point(alpha = 0.6, colour = pal["red"]) +
+  ggplot2::labs(x = "log10 body mass (g)", y = "lnRR")
 
 p1 + p2
 ```
@@ -149,22 +149,22 @@ p1 + p2
 ```{r}
 #| label: model2
 # 2. Fit the meta-regression
-model2 <- rma.mv(yi = yi,
-                 V = V,
-                 mods = ~ sex + log_mass_c,     # the two moderators
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID,
-                               ~ 1 | species,
-                               ~ 1 | phylo),
-                 R = list(phylo = A),
-                 test = "t",
-                 dfs = "contain",
-                 data = contrast_es)
+model2 <- metafor::rma.mv(yi = yi,
+                          V = V,
+                          mods = ~ sex + log_mass_c,     # the two moderators
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID,
+                                        ~ 1 | species,
+                                        ~ 1 | phylo),
+                          R = list(phylo = A),
+                          test = "t",
+                          dfs = "contain",
+                          data = contrast_es)
 
 summary(model2)
 
 # 4. Variance explained by the moderators
-r2_ml(model2)
+orchaRd::r2_ml(model2)
 ```
 
 **Interpretation**
@@ -193,24 +193,24 @@ r2_ml(model2)
 #| label: fig-orchard-sex
 #| fig-cap: "Orchard plot of Model 2 for sex: mean lnRR for females and males (circles), 95% CIs (thick bars) and prediction intervals (thin bars). k = effect sizes (studies)."
 #| fig-height: 4
-orchard_plot(model2,
-             mod = "sex",              # one 'branch' per sex
-             group = "study_ID",       # count the number of studies
-             xlab = "lnRR (warming vs control)",
-             cb = FALSE)               # use the workshop's red colours
+orchaRd::orchard_plot(model2,
+                      mod = "sex",              # one 'branch' per sex
+                      group = "study_ID",       # count the number of studies
+                      xlab = "lnRR (warming vs control)",
+                      cb = FALSE)               # use the workshop's red colours
 ```
 
 ```{r}
 #| label: fig-bubble-mass
 #| fig-cap: "Bubble plot of Model 2 for body mass (averaged over sex)."
 #| fig-height: 4
-bubble_plot(model2,
-            mod = "log_mass_c",        # the continuous moderator
-            group = "study_ID",
-            xlab = "log10 body mass (centred)",
-            ylab = "lnRR",
-            legend.pos = "top.right",
-            est.col = "#e12744")       # colour of the regression line
+orchaRd::bubble_plot(model2,
+                     mod = "log_mass_c",        # the continuous moderator
+                     group = "study_ID",
+                     xlab = "log10 body mass (centred)",
+                     ylab = "lnRR",
+                     legend.pos = "top.right",
+                     est.col = "#e12744")       # colour of the regression line
 ```
 :::
 
@@ -241,27 +241,27 @@ bubble_plot(model2,
 #| fig-cap: "Funnel plot of lnRR against precision (1/SE)."
 #| fig-height: 4.5
 #| fig-width: 6
-funnel(x = contrast_es$yi,        # effect sizes
-       vi = contrast_es$vi,       # sampling variances
-       yaxis = "seinv",           # y-axis = precision (1 / SE)
-       col = "#e12744",           # colour of the points
-       xlab = "lnRR",
-       ylab = "Precision (1/SE)")
+metafor::funnel(x = contrast_es$yi,        # effect sizes
+                vi = contrast_es$vi,       # sampling variances
+                yaxis = "seinv",           # y-axis = precision (1 / SE)
+                col = "#e12744",           # colour of the points
+                xlab = "lnRR",
+                ylab = "Precision (1/SE)")
 ```
 
 ```{r}
 #| label: model3
-model3 <- rma.mv(yi = yi,
-                 V = V,
-                 mods = ~ sex + log_mass_c + inv_sqrt_n + year_c,   # + two bias moderators
-                 random = list(~ 1 | study_ID,
-                               ~ 1 | es_ID,
-                               ~ 1 | species,
-                               ~ 1 | phylo),
-                 R = list(phylo = A),
-                 test = "t",
-                 dfs = "contain",
-                 data = contrast_es)
+model3 <- metafor::rma.mv(yi = yi,
+                          V = V,
+                          mods = ~ sex + log_mass_c + inv_sqrt_n + year_c,   # + two bias moderators
+                          random = list(~ 1 | study_ID,
+                                        ~ 1 | es_ID,
+                                        ~ 1 | species,
+                                        ~ 1 | phylo),
+                          R = list(phylo = A),
+                          test = "t",
+                          dfs = "contain",
+                          data = contrast_es)
 
 summary(model3)
 ```
@@ -272,22 +272,22 @@ summary(model3)
 #| fig-height: 4
 #| fig-width: 10
 # Small-study effect
-p_small <- bubble_plot(model3,
-                       mod = "inv_sqrt_n",
-                       group = "study_ID",
-                       xlab = "sqrt(1 / effective n)",
-                       ylab = "lnRR",
-                       legend.pos = "none",
-                       est.col = "#e12744")
+p_small <- orchaRd::bubble_plot(model3,
+                                mod = "inv_sqrt_n",
+                                group = "study_ID",
+                                xlab = "sqrt(1 / effective n)",
+                                ylab = "lnRR",
+                                legend.pos = "none",
+                                est.col = "#e12744")
 
 # Time-lag effect
-p_year <- bubble_plot(model3,
-                      mod = "year_c",
-                      group = "study_ID",
-                      xlab = "Publication year (centred)",
-                      ylab = "lnRR",
-                      legend.pos = "none",
-                      est.col = "#e12744")
+p_year <- orchaRd::bubble_plot(model3,
+                               mod = "year_c",
+                               group = "study_ID",
+                               xlab = "Publication year (centred)",
+                               ylab = "lnRR",
+                               legend.pos = "none",
+                               est.col = "#e12744")
 
 p_small + p_year   # side by side with patchwork
 ```
@@ -315,8 +315,8 @@ round(coef(summary(model2)), 4)
 round(coef(summary(model3)), 4)
 
 # Variance explained by the moderators
-r2_ml(model2)
-r2_ml(model3)
+orchaRd::r2_ml(model2)
+orchaRd::r2_ml(model3)
 ```
 
 ```{r}
@@ -334,13 +334,13 @@ coef_3 <- data.frame(model = "Model 3",
 
 coef_tbl <- rbind(coef_2, coef_3)   # stack the two tables
 
-ggplot(coef_tbl, aes(x = estimate, y = term, colour = model)) +
-  geom_vline(xintercept = 0, colour = "grey60") +
-  geom_errorbar(aes(xmin = ci.lb, xmax = ci.ub), width = 0.2, orientation = "y",
-                position = position_dodge(width = 0.5)) +
-  geom_point(size = 2.5, position = position_dodge(width = 0.5)) +
-  scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
-  labs(x = "Estimate (lnRR scale)", y = NULL)
+ggplot2::ggplot(coef_tbl, ggplot2::aes(x = estimate, y = term, colour = model)) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey60") +
+  ggplot2::geom_errorbar(ggplot2::aes(xmin = ci.lb, xmax = ci.ub), width = 0.2, orientation = "y",
+                         position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::geom_point(size = 2.5, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
+  ggplot2::labs(x = "Estimate (lnRR scale)", y = NULL)
 ```
 
 **What changed?**
@@ -370,7 +370,7 @@ ggplot(coef_tbl, aes(x = estimate, y = term, colour = model)) +
 ```{r}
 #| label: writeup-values
 # Values used in the write-up
-i2_m1   <- i2_ml(model1)       # I2 of Model 1
+i2_m1   <- orchaRd::i2_ml(model1)       # I2 of Model 1
 pred_m1 <- predict(model1)     # mean, CI and prediction interval of Model 1
 
 # A small function to convert lnRR to a % change (as text)
