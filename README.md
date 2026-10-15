@@ -1,4 +1,7 @@
 # Meta-analysis Workshop – for ecological and evolutionary physiologists
+[![license](https://img.shields.io/badge/license-MIT%20+%20file%20LICENSE-lightgrey.svg)](https://choosealicense.com/)
+![Open Source
+Love](https://badges.frapsoft.com/os/v2/open-source.svg?v=103)
 
 **Website:** <https://nicholaswunz.github.io/meta-analysis-workshop/>
 
@@ -44,4 +47,4 @@ Tip: the first build takes a while (installing packages and bootstrapping I² es
 
 ## Sources and credit
 
-Adapted from and inspired by: Noble & Pottier's *Meta-Analysis Workshop* (https://daniel1noble.github.io/meta-analysis_workshop/), Nakagawa et al.'s *Meta-analysis tutorial* (https://itchyshin.github.io/Meta-analysis_tutorial/), the Physalia *Meta-analysis in R* course (Sánchez-Tójar & Dimri), Lacza et al.'s *One dataset, four meta-analyses* and Mizuno et al.'s *Unified framework for phylogenetic and spatial meta-analysis* tutorials. Real datasets are redistributed for teaching from the authors' public repositories – please cite the original papers.
+Adapted from and inspired by: Noble & Pottier's *Meta-Analysis Workshop* (https://daniel1noble.github.io/meta-analysis_workshop/), Nakagawa et al.'s *Meta-analysis tutorial* (https://itchyshin.github.io/Meta-analysis_tutorial/), Lacza et al.'s *One dataset, four meta-analyses* and Mizuno et al.'s *Unified framework for phylogenetic and spatial meta-analysis* tutorials. Real datasets are redistributed for teaching from the authors' public repositories – please cite the original papers.
