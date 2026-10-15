@@ -1,0 +1,18 @@
+# Quarto
+/.quarto/
+/_site/
+*_cache/
+*_files/
+
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# Fitted brms models (large; re-created when you run the brms code)
+brms_fits/*.rds
+
+# OS files
+.DS_Store
+Thumbs.db

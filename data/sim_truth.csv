@@ -1,0 +1,22 @@
+dataset,parameter,value
+contrast (lnRR),b0,0.15
+contrast (lnRR),b_male,0.12
+contrast (lnRR),b_mass,-0.08
+contrast (lnRR),b_year,-0.008
+contrast (lnRR),s2_study,0.01
+contrast (lnRR),s2_phylo,0.015
+contrast (lnRR),s2_species,0.004
+contrast (lnRR),s2_es,0.006
+contrast (lnRR),ln_cvr,0.15
+correlation (Zr),b0,0.25
+correlation (Zr),b_male,0.08
+correlation (Zr),b_mass,0.05
+correlation (Zr),b_year,-0.008
+correlation (Zr),s2_study,0.01
+correlation (Zr),s2_phylo,0.01
+correlation (Zr),s2_species,0.003
+correlation (Zr),s2_es,0.008
+spatial (ARR),b0_at_27S,0.2
+spatial (ARR),b_lat,0.006
+spatial (ARR),spatial_var,0.0064
+spatial (ARR),range_km,300

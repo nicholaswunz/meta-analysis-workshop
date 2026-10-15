@@ -1,0 +1,221 @@
+---
+title: "Systematic review and literature search"
+---
+
+```{r}
+#| label: setup
+#| echo: false
+
+# Load packages and the workshop plotting theme
+pacman::p_load(tidyverse)
+source(here::here("R", "theme_workshop.R"))
+```
+
+A systematic review is a way to synthesise the existing literature on a given topic using **clearly documented, transparent methods**. Systematic reviews are an essential part of a meta-analysis as they allow you to identify and collate studies for extracting data on moderators and descriptive statistics used to calculate effect sizes – the data that all meta-analytic modelling depends upon! 
+
+Systematic reviews are important because they can be used to identify gaps in the literature, identify areas of consensus and disagreement, and identify areas where more research is needed [@ODea2021; @Foo2021]. Systematic reviews can also be used to identify potential sources of bias in the literature and potential sources of heterogeneity in meta-analyses. Often a review of these biases and gaps is provided in the results of meta-analyses, and these feed back to influence the types of questions the meta-analysis can, and will be able to, address. 
+
+While systematic reviews can be done without a meta-analysis, **a meta-analysis cannot be done without a systematic review** [@ODea2021] (a good one at least). In fact, you might start out with the intention of doing a meta-analysis but realise that there are not enough studies to do a meta-analysis. Not all is lost! If you've been careful and thorough enough in your systematic search, then a solid review of the literature can be a valuable contribution to the field. This chapter is about reviewing some gold standards for doing a rigorous systematic review. There are many resources available for you to read to help you through this process [e.g., @ODea2021; @Foo2021], but we will cover the most important basics here to get you started.
+
+# From a biological question to a review question
+
+One of the most important first steps in a systematic review / meta-analysis is **clearly defining your question and the scope of your review/meta-analysis**. Ill-defined questions make it difficult to conduct literature searches, extract data and ultimately do the meta-analysis. That’s because the question influences the search terms that you use, the study designs you are looking to include, the outcome variables you are looking to measure, and the type of effect size to use along with the necessary descriptive statistics and moderator variables you need to extract. Additionally, poorly defined questions can make completing the meta-analysis an insurmountable task. If the question is too broad you might have hundreds of thousands of papers to screen – let alone extract data from!
+
+Forming a question is often an iterative process. You will probably first start with a broad question and an idea of the types of work already published. That is usually followed by a 'scoping search' or some sort of literature mapping exercise that allows you to get a better sense of the literature and to refine your question and scope further [@Foo2021; @Cobo2011]. After doing your homework – manual searches, checking citations to and within key works, asking colleagues and supervisors, and possibly using AI tools (large language models [LLMs] such as Claude or ChatGPT) – you will have a **set of key papers** and a good grasp of the types of research that have been done in the field. 
+
+## PECOST framework
+
+Identifying a good question is not always easy, but using the **PECOST** framework can help you clearly define the population(s) you are interested in collecting data on (e.g., bird embryos), the type of intervention on this population (e.g., temperature manipulation), the comparator (e.g., control group) and the outcome variable(s) (e.g., hatching success). Foo et al. [-@Foo2021] recommend breaking a question into **PECOST** elements. Each element becomes a block of search terms *and* an inclusion criterion for screening.
+
+| Element | Meaning | Example: *"Does warm acclimation increase metabolic rate in ectothermic vertebrates?"* |
+|---|---|---|
+| **P**opulation | Organisms / systems of interest | Ectothermic vertebrates (fish, amphibians, reptiles) |
+| **E**xposure / intervention | The treatment or predictor | Acclimation (≥ 7 days) to an elevated temperature |
+| **C**omparator | What the exposure is compared against | A lower (control) acclimation temperature, same species, same study |
+| **O**utcome | The response measured | Standard or resting metabolic rate (O~2~ consumption) |
+| **S**tudy design | Which designs are eligible | Laboratory experiments reporting means, SDs/SEs and *n* per group |
+| **T**imeframe | Time limits on studies or exposures | Published 1950–2025; acclimation exposure ≥ 7 days |
+
+Questions come in two broad flavours [@Foo2021]:
+
+- **Closed-framed** questions (all PECOST elements defined), typical of a meta-analysis testing an effect.
+- **Open-framed** questions (some elements open, e.g., "what physiological traits have been measured in range-expanding species?"), typical of systematic maps.
+
+Many folks recommend pre-registering your systematic review and meta-analysis because it helps you walk through all these crucial steps early. Pre-registration forces you to think through the question and scope of your review before you start. It also allows you to be transparent about your methods and to avoid bias in your review [@ODea2021; @Gurevitch2018; @Foo2021]. If you can do this, it's a great exercise!  
+
+# Search strategy and multiple databases
+
+The search strategy is the process of identifying and selecting studies to include in your systematic review and meta-analysis. **A good search strategy should capture as many relevant studies as possible while reducing the number of irrelevant ones**. 
+
+To achieve this goal, it is important to: 
+
+1) identify appropriate **literature sources**, 
+2) create relevant **search strings** for database/platform searches (which often differ across databases), 
+3) **test** the search string for each database and refine, 
+4) **supplement database searches** by examining the reference lists and citing articles of relevant studies and reviews (also known as backward and forward searches), 
+5) make a clear attempt to access **grey literature** (e.g., searching thesis portals) and 
+6) **remove duplicates** [@Foo2021]. 
+
+A good search strategy should be systematic and transparent. It would obviously be good to be "comprehensive", but that's a high bar, not often realistic, and indeed, not always necessary.
+
+It has been clear for a long time that searching multiple databases is important for ensuring that you are including all relevant studies in your review [@Foo2021; @BarIlan2018; @Mongeon2016]. This is because different databases index different journals and different types of studies. For example, PubMed is a great database for biomedical research, but it does not index many social science journals. Web of Science and Scopus are more comprehensive databases that index a wider range of journals, but they still do not index everything. One database can give you a very different set of papers to screen than another. So, if you only search one database, you might be missing out on a lot of relevant studies. Google Scholar is often used for ad hoc literature searches, but @Gusenbauer2020 show it is unsuitable as a *principal* search system for systematic reviews because it lacks proper Boolean operators, produces non-reproducible result sets, and caps retrievable results. It is better used only as a *supplementary* source alongside proper databases (e.g., Web of Science, Scopus).
+
+A crucial part of the search strategy is that you document everything carefully. When did you do the search?  What databases did you search? What search strings did you use? What filters did you use? How many papers did you get from each database? How many duplicates did you remove? How many papers did you screen? How many papers did you include in the review/meta-analysis? This information is important for transparency and reproducibility. It also allows others to understand the scope of your review and to identify potential sources of bias.
+
+
+# Boolean operators and search syntax
+
+We alluded to the importance of search string development above, but how do we know if our search strings are effective? Database searches are often developed using Boolean operators (AND, OR, NOT) and wildcards (`*`), sometimes with specific reference to the fields (title, abstract and keywords - check defaults). The exact syntax for these operators and wildcards can differ across databases so it's important to check the documentation for each database you are using (**Fig. 1**).
+
+```{r}
+#| label: fig-boolean
+#| echo: false
+#| fig-cap: "Boolean logic for two concept blocks. Shaded areas show the records retrieved."
+#| fig-height: 2.8
+#| fig-width: 9
+# A helper that returns the x and y coordinates of a circle centred at x0
+circle <- function(x0, r = 1, n = 200) {
+  t <- seq(0, 2 * pi, length.out = n)
+  tibble(x = x0 + r * cos(t),
+         y = r * sin(t))
+}
+
+# Two overlapping circles: A = "temperature" (left), B = "metabolism" (right)
+outlines <- bind_rows(
+  circle(-0.6) %>% mutate(set = "A"),
+  circle(0.6)  %>% mutate(set = "B")
+)
+
+# A fine grid of points, flagged by whether they fall inside circle A and/or B
+grid <- expand_grid(x = seq(-1.8, 1.8, by = 0.02),
+                    y = seq(-1.05, 1.05, by = 0.02)) %>%
+  mutate(A = (x + 0.6)^2 + y^2 <= 1,
+         B = (x - 0.6)^2 + y^2 <= 1)
+
+# One panel per Boolean operator: keep the points that the search retrieves
+panels <- bind_rows(
+  grid %>% mutate(op = "temperature AND metabolism", keep = A & B),
+  grid %>% mutate(op = "temperature OR metabolism",  keep = A | B),
+  grid %>% mutate(op = "temperature NOT metabolism", keep = A & !B)
+) %>%
+  mutate(op = fct_inorder(op))   # keep the panels in this order
+
+# Text labels for the two circles
+labels <- tibble(x = c(-1.05, 1.05),
+                 y = 0,
+                 lab = c("temperature", "metabolism"))
+
+ggplot() +
+  geom_raster(data = filter(panels, keep),
+              aes(x = x, y = y),
+              fill = "#fecdd0") +
+  geom_path(data = outlines,
+            aes(x = x, y = y, group = set),
+            colour = pal["dark"], linewidth = 0.8) +
+  geom_text(data = labels,
+            aes(x = x, y = y, label = lab),
+            size = 3.2) +
+  facet_wrap(~ op) +
+  coord_equal() +
+  theme_void() +
+  theme(strip.text = element_text(face = "bold", size = 11))
+```
+
+A good search string should be sensitive enough to capture all relevant studies but specific enough to exclude irrelevant ones [@Foo2021; @Lagisz2025]. One way to test the sensitivity of your search string is to use a set of "benchmark" papers that you know are relevant to your review [@Lagisz2025]. We'd suggest **15-20 such papers**. These are papers that you have identified by your scoping searches, possibly in Google Scholar, that you know are relevant to your question and you think should be captured by your search string. 
+
+Different search strings can then be evaluated as to their effectiveness at: 1) capturing these benchmark papers and 2) their specificity. Sometimes these are out of sync. For example, if the search yields hundreds of thousands of papers and captures all your benchmark papers but also includes many irrelevant ones, you need to refine your search string. The goal is to find a **balance between sensitivity and specificity** and often this requires iterative refinement, looking through the results to identify keywords or patterns in the titles and abstracts that are leading to false positives and refining the search string to exclude them. Using "NOT" can be helpful for this, but be careful not to exclude relevant studies.
+
+As an example, if you are interested in the effects of temperature on hatching success in birds, you might start with a search string like: "temperature AND hatching success AND birds". This search string might be too specific and might miss relevant studies that use different terminology, emphasise different outcomes or have different designs (e.g., "development rate" instead of "hatching success" because many studies on development rate also report hatching success). You often also need to refine your search string to include synonyms and related terms (e.g., "temperature AND (hatching success OR incubation) AND birds"). 
+
+It's also important to consider the use of wildcards and truncation in your search string. For example, using "bird*" instead of "birds" can help capture studies that use different forms of the word (e.g., "bird", "birds", "birding"). Trying different combinations of search terms and operators can help you find the right balance between sensitivity and specificity. Make sure to record the final search string that you use for each database and to document any refinements that you make along the way. Aiming for a query that gives you a manageable number of papers to screen (e.g., 3000-5000) is a good target.
+
+Useful syntax (exact symbols differ slightly between databases – always check the help pages of Web of Science, Scopus, etc.):
+
+| Syntax | Meaning | Example |
+|---|---|---|
+| `OR` | either term (synonyms) | `lizard* OR squamate*` |
+| `AND` | both terms (different concepts) | `(acclimat*) AND (metabolic rate)` |
+| `NOT` | exclude a term (use carefully!) | `... NOT (mammal*)` |
+| `*` | truncation / wildcard | `acclimat*` → acclimation, acclimated, acclimatisation |
+| `"..."` | exact phrase | `"metabolic rate"` |
+| `NEAR/n` (WoS) | terms within *n* words | `oxygen NEAR/3 consumption` |
+| `( )` | group terms; controls the order of operations | `(A OR B) AND (C OR D)` |
+
+
+# Screening and the PRISMA diagram
+After searching several databases (e.g., Web of Science *and* Scopus, plus grey literature), records are:
+
+1. **De-duplicated** (e.g., with the `synthesisr` or `revtools` R packages, or a reference manager).
+2. **Title/abstract screened** against the PECOST inclusion criteria – ideally by two people independently, at least for a subset, using decision trees to improve agreement.
+3. **Full-text screened**, recording a reason for every exclusion.
+4. **Data extracted** from included studies.
+
+Record the number of studies identified in your final search and how many were excluded at the title and abstract level (important for reporting in your PRISMA diagram [@ODea2021]; **Fig. 2**). You can use Endnote or other reference managers to help. Merged and deduplicated search results can then be uploaded to systematic review software (e.g., **Rayyan** – @Ouzzani2016; see also [metRscreen](https://github.com/EIvimeyCook/metRscreen)) for screening. There are also cool new machine learning tools that can help with screening (e.g., **ASReview** – @vandeSchoot2021) and LLMs such as Claude and ChatGPT might also be useful, so they are worth considering. However, remember to be critical of them and test their performance on your specific project.
+
+Once you're at this stage, a few important things need to happen. 
+
+1) You need to develop a clear set of **inclusion and exclusion criteria** – a decision tree. Which studies do you think should be included in the meta-analysis (or not) based on their title and abstract, and why? Try to develop simple 'yes' and 'no' decisions based on high-level elements initially. For example, if we want birds, then an obvious inclusion criterion at the top would be to ask: *"Is the study done with a bird species?"*. If the answer is no, it is excluded. This is important for transparency and reproducibility. 
+
+2) You should try to have at least **two independent reviewers** screen the titles and abstracts in developing the decision tree that allows you to make this inclusion/exclusion decision. This is important for reducing bias and increasing reliability, but also for testing the effectiveness of your decision tree. We usually recommend setting up 3-5 testing sets of n = 50 papers where everyone on the team screens independently. You then check for conflicts and inter-rater reliability. If conflicts are low (<5%), this suggests the decision tree is fairly good.
+
+3) You need to have a clear process for resolving disagreements between reviewers (e.g., discussion, third reviewer, maybe an LLM pass as well). Discussion of these conflicts is usually also very good at identifying weaknesses in the decision tree and can help you refine it further.
+
+4) Finally, you need to document everything carefully (e.g., number of studies screened, number of studies included/excluded, reasons for exclusion). 
+
+Make sure you update the PRISMA diagram as you go along and report this information in your final review/meta-analysis. The flow of records is reported in a **PRISMA** diagram [@ODea2021]:
+
+```{r}
+#| label: fig-prisma
+#| echo: false
+#| fig-cap: "A PRISMA-style flow diagram for a (hypothetical) review of warm acclimation and metabolic rate. Reporting the number of records at each stage – and why full texts were excluded – makes the review transparent and repeatable."
+#| fig-height: 6.2
+#| fig-width: 8
+# The boxes: x and y give the position of each box, label gives the text
+boxes <- tribble(
+  ~id, ~x,   ~y, ~label,
+  1,   1,    5,  "Records identified\nWeb of Science (n = 1,284)\nScopus (n = 1,517)",
+  2,   1,    4,  "Records after de-duplication\n(n = 1,902)",
+  3,   1,    3,  "Titles & abstracts screened\n(n = 1,902)",
+  4,   1,    2,  "Full texts assessed\n(n = 214)",
+  5,   1,    1,  "Studies included in meta-analysis\n(n = 63 studies; k = 311 effect sizes)",
+  6,   2.25, 3,  "Excluded at title/abstract\n(n = 1,688)",
+  7,   2.25, 2,  "Full texts excluded (n = 151)\n- no control temperature (62)\n- acclimation < 7 days (38)\n- missing SD/SE or n (33)\n- endotherm (18)"
+)
+
+# Mark which boxes are exclusions (drawn in pink) and which are kept (grey)
+boxes <- boxes %>%
+  mutate(type = ifelse(id %in% c(6, 7), "excluded", "kept"))
+
+# The arrows: each row is one arrow from (x, y) to (xend, yend)
+arrows <- tribble(
+  ~x,  ~y,   ~xend, ~yend,
+  1,   4.62, 1,     4.33,
+  1,   3.67, 1,     3.33,
+  1,   2.67, 1,     2.33,
+  1,   1.67, 1,     1.33,
+  1.6, 3,    1.75,  3,
+  1.6, 2,    1.75,  2
+)
+
+ggplot() +
+  geom_segment(data = arrows,
+               aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.18, "cm"), type = "closed"),
+               colour = "grey40") +
+  geom_label(data = boxes,
+             aes(x = x, y = y, label = label, fill = type),
+             size = 3.2, lineheight = 0.95,
+             label.padding = unit(0.5, "lines")) +
+  scale_fill_manual(values = c(kept = "#EEECEA", excluded = "#fecdd0"),
+                    guide = "none") +
+  coord_cartesian(xlim = c(0.35, 2.9), ylim = c(0.5, 5.5)) +
+  theme_void()
+```
+
+
+# References
+
+<div id="refs"></div>
+
+<br>
+

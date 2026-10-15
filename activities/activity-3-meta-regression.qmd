@@ -1,0 +1,387 @@
+---
+title: "Activity 3: meta-regression and publication bias"
+---
+
+::: {.session-banner .practical}
+**Activity.** We continue with the simulated warming dataset (lnRR). Do sex and body size explain why effects differ? And is there evidence of publication bias? Try each step before opening the 💡 *Solution* boxes.
+:::
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data handling and plots
+               metafor,     # meta-analysis
+               orchaRd,     # orchard and bubble plots, I2, R2
+               ape,         # phylogenetic trees
+               patchwork)   # put ggplots side by side
+
+# Workshop colours and plot style
+source(here::here("R", "theme_workshop.R"))
+```
+
+# Prepare the data, V and A (as in Activity 2)
+
+Run this chunk. It repeats the preparation from [Activity 2](activity-2-multilevel.qmd) (lnRR, the shared-control matrix **V** and the phylogenetic matrix **A**) and adds the new columns we need here:
+
+- `log_mass_c`: log~10~ body mass, **centred** (the average species has value 0). Centring makes the intercept mean "an animal of average size".
+- `inv_sqrt_n`: $\sqrt{1/\tilde{n}}$, where $\tilde{n} = N_{1}N_{2} / (N_{1} + N_{2})$ is the 'effective sample size' (group 1 = treatment, group 2 = control). It measures how imprecise a study is, and we'll use it to test for small-study effects.
+- `year_c`: publication year, centred on the average year.
+
+```{r}
+#| label: prep
+# Read in the simulated contrast data
+contrast_dat <- read.csv(here::here("data", "sim_contrast.csv"))
+
+# lnRR and its sampling variance
+contrast_es <- escalc(measure = "ROM",
+                      m1i = treatment_mean,     # group 1 = treatment
+                      sd1i = treatment_sd,
+                      n1i = treatment_n,
+                      m2i = control_mean,       # group 2 = control
+                      sd2i = control_sd,
+                      n2i = control_n,
+                      data = contrast_dat)
+
+contrast_es$es_ID <- 1:nrow(contrast_es)       # one ID per effect size
+contrast_es$phylo <- contrast_es$species       # copy of species for the phylogenetic effect
+
+# Moderators
+contrast_es$sex        <- factor(contrast_es$sex, levels = c("female", "male"))   # female = reference
+contrast_es$log_mass   <- log10(contrast_es$body_size)
+contrast_es$log_mass_c <- contrast_es$log_mass - mean(contrast_es$log_mass)       # centred
+
+# Publication-bias moderators
+contrast_es$n_tilde    <- (contrast_es$treatment_n * contrast_es$control_n) /
+                          (contrast_es$treatment_n + contrast_es$control_n)       # effective sample size
+contrast_es$inv_sqrt_n <- sqrt(1 / contrast_es$n_tilde)
+contrast_es$year_c     <- contrast_es$study_year - mean(contrast_es$study_year)   # centred year
+
+# Shared-control V matrix (same as Activity 2)
+contrast_es$cov_c <- contrast_es$control_sd^2 /
+  (contrast_es$control_n * contrast_es$control_mean^2)
+
+k <- nrow(contrast_es)
+V <- diag(contrast_es$vi)
+for (i in 1:k) {
+  for (j in 1:k) {
+    if (i != j & contrast_es$comparison_ID[i] == contrast_es$comparison_ID[j]) {
+      V[i, j] <- contrast_es$cov_c[i]
+    }
+  }
+}
+
+# Phylogenetic correlation matrix (same as Activity 2)
+tree <- read.tree(here::here("data", "sim_tree.tre"))
+tree <- keep.tip(tree, unique(contrast_es$species))
+A <- vcv(tree, corr = TRUE)
+```
+
+---
+
+# Task 1 – Model 1 (Model 2 from Activity 2)
+
+**Goal:** re-create the final model from Activity 2. It is the starting point and comparison model for this activity.
+
+**What to do:** fit `rma.mv()` with the matrix `V`, the four random effects (`study_ID`, `es_ID`, `species`, `phylo`) and `R = list(phylo = A)`, plus `test = "t"` and `dfs = "contain"`. Save it as `model1`. Your estimate should match Model 2 from Activity 2.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: model1
+model1 <- rma.mv(yi = yi,
+                 V = V,                         # shared-control V matrix
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID,
+                               ~ 1 | species,
+                               ~ 1 | phylo),
+                 R = list(phylo = A),           # phylogenetic correlation matrix
+                 test = "t",
+                 dfs = "contain",
+                 data = contrast_es)
+
+summary(model1)
+```
+:::
+
+---
+
+# Task 2 – Meta-regression with sex and body size (Model 2)
+
+**Goal:** test whether **sex** and **body size** explain why the effect of warming differs among effect sizes.
+
+**What to do:**
+
+1. **Look at the data first.**
+   - Count effect sizes per sex with `contrast_es %>% count(sex)`.
+   - Make a boxplot of `yi` by `sex`, and a scatterplot of `yi` against `log_mass`. Do you expect an effect of either?
+2. **Fit the model.** Copy Model 1 and add `mods = ~ sex + log_mass_c`. Save it as `model2`.
+3. **Read the *Model Results* table:**
+   - `intrcpt`: the expected lnRR for the reference group (**females**) of **average** body mass;
+   - `sexmale`: how much **higher or lower** males are than females (a difference, not the male mean);
+   - `log_mass_c`: change in lnRR for a 10-fold increase in body mass.
+4. **How much heterogeneity do the moderators explain?** Use `r2_ml(model2)`. `R2_marginal` is the proportion explained by sex and body size.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: explore
+#| fig-height: 3.4
+#| fig-width: 9
+# 1. Look at the data
+contrast_es %>%
+  count(sex)
+
+# Boxplot of lnRR by sex
+p1 <- ggplot(contrast_es, aes(x = sex, y = yi)) +
+  geom_boxplot(fill = "#fecdd0", outlier.shape = NA) +   # hide outlier dots (all points are drawn below)
+  geom_point(alpha = 0.6, colour = pal["red"]) +
+  labs(x = NULL, y = "lnRR")
+
+# Scatterplot of lnRR against body mass
+p2 <- ggplot(contrast_es, aes(x = log_mass, y = yi)) +
+  geom_point(alpha = 0.6, colour = pal["red"]) +
+  labs(x = "log10 body mass (g)", y = "lnRR")
+
+p1 + p2
+```
+
+```{r}
+#| label: model2
+# 2. Fit the meta-regression
+model2 <- rma.mv(yi = yi,
+                 V = V,
+                 mods = ~ sex + log_mass_c,     # the two moderators
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID,
+                               ~ 1 | species,
+                               ~ 1 | phylo),
+                 R = list(phylo = A),
+                 test = "t",
+                 dfs = "contain",
+                 data = contrast_es)
+
+summary(model2)
+
+# 4. Variance explained by the moderators
+r2_ml(model2)
+```
+
+**Interpretation**
+
+- `intrcpt` = expected lnRR for **females** of **average body mass**: `r sprintf("%.3f", model2$b[1])` (`r sprintf("%.1f", 100 * (exp(model2$b[1]) - 1))`%).
+- `sexmale` = difference between males and females: `r sprintf("%.3f", model2$b[2])` (*p* `r fmt_p(model2$pval[2])`). Males respond `r if_else(model2$b[2] > 0, "more", "less")` strongly to warming.
+- `log_mass_c` = change in lnRR per 10-fold increase in body mass: `r sprintf("%.3f", model2$b[3])` (*p* `r fmt_p(model2$pval[3])`).
+- The true values used in the simulation (`data/sim_truth.csv`) were +0.12 for males and −0.08 per log~10~ g.
+:::
+
+---
+
+# Task 3 – Orchard plot of Model 2 with a moderator
+
+**Goal:** visualise the effect of sex (and, optionally, body size).
+
+**What to do:**
+
+1. Make an orchard plot by sex: `orchard_plot(model2, mod = "sex", group = "study_ID", xlab = "lnRR")`. You get one 'branch' per sex. Because the model also contains body size, each sex mean is calculated for an animal of average body size.
+2. Compare the female and male means and their CIs. Do the CIs overlap much?
+3. **Optional:** body size is continuous, so use a **bubble plot** instead: `bubble_plot(model2, mod = "log_mass_c", group = "study_ID")`.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: fig-orchard-sex
+#| fig-cap: "Orchard plot of Model 2 for sex: mean lnRR for females and males (circles), 95% CIs (thick bars) and prediction intervals (thin bars). k = effect sizes (studies)."
+#| fig-height: 4
+orchard_plot(model2,
+             mod = "sex",              # one 'branch' per sex
+             group = "study_ID",       # count the number of studies
+             xlab = "lnRR (warming vs control)",
+             cb = FALSE)               # use the workshop's red colours
+```
+
+```{r}
+#| label: fig-bubble-mass
+#| fig-cap: "Bubble plot of Model 2 for body mass (averaged over sex)."
+#| fig-height: 4
+bubble_plot(model2,
+            mod = "log_mass_c",        # the continuous moderator
+            group = "study_ID",
+            xlab = "log10 body mass (centred)",
+            ylab = "lnRR",
+            legend.pos = "top.right",
+            est.col = "#e12744")       # colour of the regression line
+```
+:::
+
+---
+
+# Task 4 – Small-study and time-lag effects (Model 3)
+
+**Goal:** check for signs of **publication bias**.
+
+- **Small-study effect:** small (imprecise) studies report larger effects, possibly because small studies with 'boring' results were never published.
+- **Time-lag (decline) effect:** effects get smaller over time, as early exciting results are followed by more cautious ones.
+
+**What to do:**
+
+1. **Funnel plot.** Run `funnel(x = contrast_es$yi, vi = contrast_es$vi, yaxis = "seinv")`. Without bias the points form a symmetric funnel. Are there 'missing' points at the bottom (imprecise studies) on one side?
+2. **Fit Model 3.** Copy Model 2 and add the two bias moderators: `mods = ~ sex + log_mass_c + inv_sqrt_n + year_c`. Save it as `model3`.
+3. **Read the two new rows:**
+   - a **positive** `inv_sqrt_n` slope means less precise studies report larger effects (a small-study effect);
+   - a **negative** `year_c` slope means effects decline over time.
+4. **Optional:** draw a bubble plot for each with `bubble_plot(model3, mod = "inv_sqrt_n", group = "study_ID")` and `mod = "year_c"`.
+
+*Why `inv_sqrt_n` and not the standard error of lnRR?* The SE of lnRR is calculated from the means themselves, so it is partly linked to the effect size even without any bias. $\sqrt{1/\tilde{n}}$ depends only on sample size.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: fig-funnel
+#| fig-cap: "Funnel plot of lnRR against precision (1/SE)."
+#| fig-height: 4.5
+#| fig-width: 6
+funnel(x = contrast_es$yi,        # effect sizes
+       vi = contrast_es$vi,       # sampling variances
+       yaxis = "seinv",           # y-axis = precision (1 / SE)
+       col = "#e12744",           # colour of the points
+       xlab = "lnRR",
+       ylab = "Precision (1/SE)")
+```
+
+```{r}
+#| label: model3
+model3 <- rma.mv(yi = yi,
+                 V = V,
+                 mods = ~ sex + log_mass_c + inv_sqrt_n + year_c,   # + two bias moderators
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID,
+                               ~ 1 | species,
+                               ~ 1 | phylo),
+                 R = list(phylo = A),
+                 test = "t",
+                 dfs = "contain",
+                 data = contrast_es)
+
+summary(model3)
+```
+
+```{r}
+#| label: fig-bias
+#| fig-cap: "Small-study (left) and time-lag (right) effects from Model 3."
+#| fig-height: 4
+#| fig-width: 10
+# Small-study effect
+p_small <- bubble_plot(model3,
+                       mod = "inv_sqrt_n",
+                       group = "study_ID",
+                       xlab = "sqrt(1 / effective n)",
+                       ylab = "lnRR",
+                       legend.pos = "none",
+                       est.col = "#e12744")
+
+# Time-lag effect
+p_year <- bubble_plot(model3,
+                      mod = "year_c",
+                      group = "study_ID",
+                      xlab = "Publication year (centred)",
+                      ylab = "lnRR",
+                      legend.pos = "none",
+                      est.col = "#e12744")
+
+p_small + p_year   # side by side with patchwork
+```
+:::
+
+---
+
+# Task 5 – How do the results differ?
+
+**Goal:** see what changes when publication bias is taken into account.
+
+**What to do:**
+
+1. Put the coefficient tables of Model 2 and Model 3 side by side: `coef(summary(model2))` and `coef(summary(model3))`.
+2. For **sex** and **body size**: did the estimates change much?
+3. For the **intercept**: did it change? What does the intercept of Model 3 represent? (Think about what `inv_sqrt_n = 0` and `year_c = 0` mean.)
+4. Did the marginal $R^2$ (`r2_ml()`) change?
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: compare
+# Coefficient tables (estimate, se, tval, df, pval, ci.lb, ci.ub)
+round(coef(summary(model2)), 4)
+round(coef(summary(model3)), 4)
+
+# Variance explained by the moderators
+r2_ml(model2)
+r2_ml(model3)
+```
+
+```{r}
+#| label: fig-compare
+#| fig-cap: "Coefficients (± 95% CI) of Models 2 and 3. The intercept drops sharply once the small-study and time-lag effects are included."
+#| fig-height: 3.6
+# Put both coefficient tables into one data frame for plotting
+coef_2 <- data.frame(model = "Model 2",
+                     term = rownames(coef(summary(model2))),
+                     coef(summary(model2)))
+
+coef_3 <- data.frame(model = "Model 3",
+                     term = rownames(coef(summary(model3))),
+                     coef(summary(model3)))
+
+coef_tbl <- rbind(coef_2, coef_3)   # stack the two tables
+
+ggplot(coef_tbl, aes(x = estimate, y = term, colour = model)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(xmin = ci.lb, xmax = ci.ub), width = 0.2, orientation = "y",
+                position = position_dodge(width = 0.5)) +
+  geom_point(size = 2.5, position = position_dodge(width = 0.5)) +
+  scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
+  labs(x = "Estimate (lnRR scale)", y = NULL)
+```
+
+**What changed?**
+
+- **Sex and body size:** the male–female difference is essentially unchanged (`r sprintf("%.3f", model2$b[2])` → `r sprintf("%.3f", model3$b[2])`), so these moderators are robust to the bias adjustment.
+- **Small-study effect:** positive slope for `inv_sqrt_n` (`r sprintf("%.2f", model3$b[4])`, *p* `r fmt_p(model3$pval[4])`). Less precise studies report larger increases, which is the signature of selective publication.
+- **Time-lag effect:** negative slope for `year_c` (`r sprintf("%.4f", model3$b[5])` per year, *p* `r fmt_p(model3$pval[5])`). Effects reported in early studies were larger.
+- **The intercept** falls from `r sprintf("%.3f", model2$b[1])` to `r sprintf("%.3f", model3$b[1])`. It now estimates the effect for an infinitely large study (`inv_sqrt_n = 0`), published in the average year (`year_c = 0`), on females of average size. The 'average' effect of warming in Model 2 was partly inflated by publication bias.
+- **Caveat:** the intercept of Model 3 extrapolates to `inv_sqrt_n = 0`, well outside the observed data, so its CI is wide and it tends to *over*-correct. In the simulation the true female effect for an average year is about 0.15–0.20, so the bias-corrected intercept is too low. Treat bias-corrected estimates as a **sensitivity analysis**, not as 'the true effect'.
+:::
+
+---
+
+# Task 6 – Write a results section for Model 3
+
+**Goal:** report the full analysis in three short paragraphs.
+
+**What to do:** write one paragraph for each of:
+
+1. **Overall effect and heterogeneity** (from Model 1): *k*, studies and species; lnRR with 95% CI and *p*; the % change; $I^2_{total}$ and how it splits (`i2_ml(model1)`); the prediction interval (`predict(model1)`).
+2. **Moderators** (from Model 2): the sex difference and the body-size slope, each with its estimate, 95% CI and *p*; the marginal $R^2$.
+3. **Publication bias** (from Model 3): the small-study and time-lag slopes with 95% CI and *p*; whether sex and body size changed; the bias-adjusted intercept and how it compares with the unadjusted mean.
+
+::: {.callout-tip collapse="true"}
+## 💡 Example write-up
+
+```{r}
+#| label: writeup-values
+# Values used in the write-up
+i2_m1   <- i2_ml(model1)       # I2 of Model 1
+pred_m1 <- predict(model1)     # mean, CI and prediction interval of Model 1
+
+# A small function to convert lnRR to a % change (as text)
+pct <- function(x) sprintf("%.1f", 100 * (exp(x) - 1))
+```
+
+::: {.writeup}
+**Overall effect and heterogeneity.** Across `r model1$k` effect sizes from `r length(unique(contrast_es$study_ID))` studies of `r length(unique(contrast_es$species))` vertebrate species, experimental warming increased physiological rates by `r pct(model1$b[1])`% (lnRR = `r sprintf("%.3f", model1$b[1])`, 95% CI `r sprintf("%.3f", model1$ci.lb)` to `r sprintf("%.3f", model1$ci.ub)`; *p* `r fmt_p(model1$pval)`). Heterogeneity was high ($I^2_{total}$ = `r sprintf("%.1f", i2_m1[1])`%; phylogeny `r sprintf("%.1f", i2_m1["I2_phylo"])`%, species `r sprintf("%.1f", i2_m1["I2_species"])`%, study `r sprintf("%.1f", i2_m1["I2_study_ID"])`%, effect size `r sprintf("%.1f", i2_m1["I2_es_ID"])`%), and the 95% prediction interval spanned `r pct(pred_m1$pi.lb)`% to `r pct(pred_m1$pi.ub)`%.
+
+**Moderators.** In a meta-regression including sex and body mass (Model 2; $R^2_{marginal}$ = `r sprintf("%.1f", 100 * r2_ml(model2)[1])`%), males showed a larger response to warming than females (difference in lnRR = `r sprintf("%.3f", model2$b[2])`, 95% CI `r sprintf("%.3f", model2$ci.lb[2])` to `r sprintf("%.3f", model2$ci.ub[2])`; *p* `r fmt_p(model2$pval[2])`; Fig. 3), and the response `r if_else(model2$b[3] < 0, "decreased", "increased")` with body mass (slope = `r sprintf("%.3f", model2$b[3])` per log~10~ g, 95% CI `r sprintf("%.3f", model2$ci.lb[3])` to `r sprintf("%.3f", model2$ci.ub[3])`; *p* `r fmt_p(model2$pval[3])`).
+
+**Publication bias.** When effective sample size and publication year were added (Model 3), we found evidence of a small-study effect (slope for √(1/ñ) = `r sprintf("%.2f", model3$b[4])`, 95% CI `r sprintf("%.2f", model3$ci.lb[4])` to `r sprintf("%.2f", model3$ci.ub[4])`; *p* `r fmt_p(model3$pval[4])`) and a decline in effect sizes over time (slope = `r sprintf("%.4f", model3$b[5])` per year, 95% CI `r sprintf("%.4f", model3$ci.lb[5])` to `r sprintf("%.4f", model3$ci.ub[5])`; *p* `r fmt_p(model3$pval[5])`). The effects of sex (`r sprintf("%.3f", model3$b[2])`, *p* `r fmt_p(model3$pval[2])`) and body mass (`r sprintf("%.3f", model3$b[3])`, *p* `r fmt_p(model3$pval[3])`) were robust to these adjustments. However, the bias-adjusted intercept (lnRR = `r sprintf("%.3f", model3$b[1])`, 95% CI `r sprintf("%.3f", model3$ci.lb[1])` to `r sprintf("%.3f", model3$ci.ub[1])`) was much smaller than the unadjusted estimate, indicating that the magnitude of the overall effect of warming is likely overestimated in the published literature.
+:::
+:::

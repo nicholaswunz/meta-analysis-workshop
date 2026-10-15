@@ -1,0 +1,422 @@
+---
+title: "Meta-analysis of variability and location-scale models"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis and location-scale models
+               orchaRd,     # orchard plots
+               patchwork)   # place ggplots side by side
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+# Four meta-analyses from one dataset
+
+| | Effect size | What varies with the moderator? | Biological question (core vs range-edge populations) |
+|---|---|---|---|
+| **Model 1** | lnRR | mean only | Do edge populations differ in mean physiology? |
+| **Model 2** | lnCVR | mean of a *variability* effect size | Are edge populations more *variable* (relative to their mean)? |
+| **Model 3** | lnRR | mean **and** heterogeneity (location-scale) | Is the edge–core difference more *inconsistent* in some groups? |
+| **Model 4** | lnCVR | mean **and** heterogeneity of lnCVR | Is the change in variability more inconsistent in some groups? |
+
+Two kinds of 'variance' are involved, and it is essential not to confuse them:
+
+- **Within-population variability** – spread among *individuals* within a group (SD, CV). Compared between groups with **lnVR** or **lnCVR** (Model 2).
+- **Between-study heterogeneity** – spread among *true effect sizes* across studies ($\sigma^2$, $\tau^2$). Modelled as a function of moderators in a **location-scale** model (Models 3 and 4).
+
+## Illustration: homoscedastic vs heteroscedastic meta-regression
+
+```{r}
+#| label: fig-ls-concept
+#| echo: false
+#| fig-cap: "Left: a standard meta-regression assumes the same residual heterogeneity in both groups (homoscedasticity). Right: a location-scale model lets the moderator change the heterogeneity (scale) as well as the mean (location). Here, group B has a larger mean *and* is much less consistent."
+#| fig-height: 3.8
+# Simulate 40 true effect sizes per group under two scenarios
+set.seed(5)
+
+homo <- tibble(model = "Homoscedastic",
+               group = rep(c("A", "B"), each = 40),
+               y = c(rnorm(40, mean = 0.2, sd = 0.15),     # same SD in both groups
+                     rnorm(40, mean = 0.4, sd = 0.15)))
+
+hetero <- tibble(model = "Heteroscedastic (location-scale)",
+                 group = rep(c("A", "B"), each = 40),
+                 y = c(rnorm(40, mean = 0.2, sd = 0.08),   # different SDs
+                       rnorm(40, mean = 0.4, sd = 0.35)))
+
+ls_demo <- bind_rows(homo, hetero) %>%
+  mutate(model = fct_inorder(model))   # keep the panels in this order
+
+ggplot(ls_demo, aes(x = group, y = y, colour = group)) +
+  geom_hline(yintercept = 0, colour = "grey70") +
+  geom_jitter(width = 0.12, alpha = 0.6, size = 2) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 6, colour = "black") +  # group means
+  facet_wrap(~ model) +
+  scale_colour_manual(values = unname(pal[c("dark", "red")]), guide = "none") +
+  labs(x = "Moderator level", y = "True effect size")
+```
+
+# Data: physiology of range-core vs range-edge populations
+
+We use @WuSeebacher2022's comparisons of physiological traits between populations at the **core** and the expanding **edge** of species' ranges (edge = numerator). As a moderator, we use the species' **dispersal mode** (aerial, aquatic or terrestrial).
+
+```{r}
+#| label: data
+# Download the data
+ce <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/pop_disp_raw_data.csv")
+
+# lnRR and lnCVR need positive means, so keep only rows where both means are > 0
+ce <- ce %>%
+  filter(mean_core > 0, mean_front > 0)
+
+# Effect size ID, and dispersal mode as a factor (a categorical moderator)
+ce$es_ID     <- 1:nrow(ce)
+ce$disp_mode <- factor(ce$disp_mode)
+
+# Model 1 effect size: lnRR (edge = group 1, core = group 2)
+ce <- escalc(measure = "ROM",
+             m1i = mean_front, sd1i = sd_front, n1i = n_front,
+             m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+             data = ce,
+             var.names = c("lnRR", "v_lnRR"))
+
+# Model 2 effect sizes: lnVR ...
+ce <- escalc(measure = "VR",
+             sd1i = sd_front, n1i = n_front,
+             sd2i = sd_core,  n2i = n_core,
+             data = ce,
+             var.names = c("lnVR", "v_lnVR"))
+
+# ... and lnCVR
+ce <- escalc(measure = "CVR",
+             m1i = mean_front, sd1i = sd_front, n1i = n_front,
+             m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+             data = ce,
+             var.names = c("lnCVR", "v_lnCVR"))
+
+# Number of effect sizes for each dispersal mode
+ce %>%
+  count(disp_mode)
+```
+
+---
+
+# Model 1 – The mean (lnRR)
+
+```{r}
+#| label: m1
+# Multilevel meta-analysis of lnRR
+m1_lnRR <- rma.mv(yi = lnRR,
+                  V = v_lnRR,
+                  random = list(~ 1 | study_ID,
+                                ~ 1 | es_ID),
+                  test = "t",
+                  dfs = "contain",
+                  data = ce)
+
+summary(m1_lnRR)
+```
+
+# Model 2 – Within-population variability (lnCVR)
+
+```{r}
+#| label: m2
+# Multilevel meta-analysis of lnCVR (the same model, a different effect size)
+m2_lnCVR <- rma.mv(yi = lnCVR,
+                   V = v_lnCVR,
+                   random = list(~ 1 | study_ID,
+                                 ~ 1 | es_ID),
+                   test = "t",
+                   dfs = "contain",
+                   data = ce)
+
+summary(m2_lnCVR)
+
+# lnVR for comparison (ignores the mean-variance relationship)
+m2_lnVR <- rma.mv(yi = lnVR,
+                  V = v_lnVR,
+                  random = list(~ 1 | study_ID,
+                                ~ 1 | es_ID),
+                  test = "t",
+                  dfs = "contain",
+                  data = ce)
+
+# Compare the three overall means
+model_means <- data.frame(
+  model    = c("Model 1: lnRR (mean)",
+               "Model 2: lnCVR (relative variability)",
+               "Model 2b: lnVR (absolute variability)"),
+  estimate = c(m1_lnRR$b[1],  m2_lnCVR$b[1],  m2_lnVR$b[1]),
+  ci_lb    = c(m1_lnRR$ci.lb, m2_lnCVR$ci.lb, m2_lnVR$ci.lb),
+  ci_ub    = c(m1_lnRR$ci.ub, m2_lnCVR$ci.ub, m2_lnVR$ci.ub)
+)
+
+# Percentage difference between edge and core populations
+model_means$percent_change <- 100 * (exp(model_means$estimate) - 1)
+
+model_means
+```
+
+```{r}
+#| label: fig-m1-m2
+#| fig-cap: "Orchard plots of Model 1 (mean, lnRR) and Model 2 (relative variability, lnCVR) for edge vs core populations."
+#| fig-height: 3.6
+#| fig-width: 10
+p_m1 <- orchard_plot(m1_lnRR,
+                     mod = "1",
+                     group = "study_ID",
+                     xlab = "lnRR (edge / core)",
+                     cb = FALSE)
+
+p_m2 <- orchard_plot(m2_lnCVR,
+                     mod = "1",
+                     group = "study_ID",
+                     xlab = "lnCVR (edge / core)",
+                     cb = FALSE)
+
+p_m1 + p_m2   # side by side with patchwork
+```
+
+## Interpreting
+
+- **lnRR** ≈ `r sprintf("%.3f", m1_lnRR$b[1])`: on average, edge and core populations `r if (m1_lnRR$pval < 0.05) "differ" else "do not differ significantly"` in mean physiology (`r sprintf("%+.1f", 100 * (exp(m1_lnRR$b[1]) - 1))`%).
+- **lnCVR** ≈ `r sprintf("%.3f", m2_lnCVR$b[1])`: the coefficient of variation in edge populations is `r sprintf("%+.1f", 100 * (exp(m2_lnCVR$b[1]) - 1))`% relative to the core (*p* `r fmt_p(m2_lnCVR$pval)`). $e^{lnCVR}$ is a **ratio of CVs**.
+- lnCVR effect sizes have much larger sampling variances than lnRR (compare the widths of the 95% CIs): variability is harder to estimate than a mean, so meta-analyses of variability need many effect sizes [@Senior2020].
+
+---
+
+# Model 3 – Location-scale model for lnRR
+
+In a location-scale model, the moderator enters **two** linear predictors [@Viechtbauer2022ls]:
+
+$$
+\begin{aligned}
+\text{location:}\quad & y_{i} = \beta^{(l)}_{0} + \beta^{(l)}_{1}x_{i} + s_{j[i]} + e_{i} + m_{i} \\
+\text{scale:}\quad & e_{i} \sim N(0, \sigma^2_{e,i}), \qquad \ln(\sigma_{e,i}) = \beta^{(s)}_{0} + \beta^{(s)}_{1}x_{i}
+\end{aligned}
+$$
+
+Here, $x_{i}$ is the moderator value for effect size *i*, the superscripts $(l)$ and $(s)$ denote the location and scale parts, and $s_{j[i]}$, $e_{i}$ and $m_{i}$ are the study, effect size and sampling error terms, as before. A positive scale coefficient means **more** residual heterogeneity; $e^{\beta^{(s)}_{1}}$ is the multiplicative change in the heterogeneity SD.
+
+::: {.panel-tabset}
+
+## Option A (metafor, categorical moderator): heteroscedastic within-study variance
+
+For a **categorical** moderator, a multilevel location-scale model can be fitted in `rma.mv()` by letting the within-study (effect-size-level) variance differ among moderator levels with `struct = "DIAG"`:
+
+```{r}
+#| label: m3
+# Homoscedastic meta-regression (the same within-study variance for all levels)
+m3_hom <- rma.mv(yi = lnRR,
+                 V = v_lnRR,
+                 mods = ~ disp_mode,
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID),
+                 test = "t",
+                 dfs = "contain",
+                 data = ce)
+
+# Location-scale: one within-study variance per dispersal mode
+m3_ls <- rma.mv(yi = lnRR,
+                V = v_lnRR,
+                mods = ~ disp_mode,
+                random = list(~ 1 | study_ID,
+                              ~ disp_mode | es_ID),   # inner = moderator, outer = effect size
+                struct = "DIAG",                      # a separate variance (tau^2) per level
+                test = "t",
+                dfs = "contain",
+                data = ce)
+
+summary(m3_ls)
+
+# Does allowing heterogeneity to differ improve the model? (likelihood-ratio test)
+anova(m3_ls, m3_hom)
+```
+
+```{r}
+#| label: m3-scale
+# Express the scale part like a location-scale model
+scale_tbl <- data.frame(disp_mode = levels(ce$disp_mode),
+                        tau2 = m3_ls$tau2)                # within-study variance per level
+
+scale_tbl$sigma    <- sqrt(scale_tbl$tau2)                # heterogeneity SD
+scale_tbl$ln_sigma <- log(scale_tbl$sigma)                # on the ln(SD) scale
+
+# Scale contrasts: each level compared with the first (reference) level
+scale_tbl$scale_contrast <- scale_tbl$ln_sigma - scale_tbl$ln_sigma[1]
+scale_tbl$sd_ratio       <- exp(scale_tbl$scale_contrast) # x-fold change in heterogeneity SD
+
+scale_tbl
+```
+
+## Option B (metafor, any moderator): two-level location-scale with `scale =`
+
+`rma()` fits location-scale models directly, for continuous or categorical moderators, but only for a **two-level** model (it ignores the clustering of effect sizes within studies – use with care, or as a check):
+
+```{r}
+#| label: m3-rma
+m3_rma <- rma(yi = lnRR,
+              vi = v_lnRR,
+              mods = ~ disp_mode,     # location part
+              scale = ~ disp_mode,    # scale part: ln(tau^2) = alpha0 + alpha1 * x
+              data = ce)
+
+summary(m3_rma)
+```
+
+::: {.callout-important}
+## Compare Options A and B
+The two-level model suggests strong differences in heterogeneity among dispersal modes (scale test *p* `r fmt_p(m3_rma$QSp)`), but the multilevel model in Option A does not (LRT *p* `r fmt_p(anova(m3_ls, m3_hom)$pval)`). Why? Option B has no study-level random effect, so between-*study* differences that happen to coincide with dispersal mode are forced into the scale part. Ignoring non-independence inflates the evidence for scale effects just as it does for location effects.
+:::
+
+Note that `metafor` models $\ln(\tau^2)$ while `brms` models $\ln(\sigma)$, so `metafor` scale coefficients are **twice** the size of the equivalent `brms` coefficients [@Lacza2025].
+
+## Option C (brms): full multilevel location-scale model
+
+```{r}
+#| eval: false
+library(brms)
+
+# sigma = TRUE: estimate a residual SD (the effect-size-level heterogeneity) in addition
+# to the known sampling SE; 'sigma ~ disp_mode' makes that SD depend on the moderator
+m3_brms <- brm(
+  bf(lnRR | se(sqrt(v_lnRR), sigma = TRUE) ~ disp_mode + (1 | study_ID),
+     sigma ~ disp_mode),
+  data = ce, family = gaussian(),
+  prior = c(prior(normal(0, 1), class = "b"),
+            prior(normal(0, 1), class = "b", dpar = "sigma"),
+            prior(student_t(3, 0, 0.5), class = "sd")),
+  chains = 4, cores = 4, iter = 4000, warmup = 1000, seed = 2026,
+  control = list(adapt_delta = 0.95), file = here::here("brms_fits", "m3_brms"))
+
+summary(m3_brms)
+# 'sigma_disp_mode...' coefficients are scale contrasts on the ln(SD) scale;
+# exp() gives the multiplicative change in heterogeneity SD
+```
+
+### Why brms?
+`brms` (and `glmmTMB`) can fit location-scale models with **any** combination of continuous and categorical scale moderators *and* the full multilevel (and phylogenetic) random-effects structure. It also gives posterior distributions for the scale coefficients, which are often estimated with considerable uncertainty.
+
+:::
+
+---
+
+# Model 4 – Location-scale model for lnCVR
+
+The same machinery applied to the variability effect size: does dispersal mode affect (i) the average change in relative variability and (ii) how *consistent* that change is?
+
+```{r}
+#| label: m4
+# Location-scale model for lnCVR
+m4_ls <- rma.mv(yi = lnCVR,
+                V = v_lnCVR,
+                mods = ~ disp_mode,
+                random = list(~ 1 | study_ID,
+                              ~ disp_mode | es_ID),
+                struct = "DIAG",
+                test = "t",
+                dfs = "contain",
+                data = ce)
+
+# Homoscedastic model for comparison
+m4_hom <- rma.mv(yi = lnCVR,
+                 V = v_lnCVR,
+                 mods = ~ disp_mode,
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID),
+                 test = "t",
+                 dfs = "contain",
+                 data = ce)
+
+summary(m4_ls)
+anova(m4_ls, m4_hom)
+```
+
+```{r}
+#| label: fig-m3-m4
+#| fig-cap: "Location (top: group means with 95% CI) and scale (bottom: estimated within-study heterogeneity SD, σ) for Models 3 (lnRR) and 4 (lnCVR) by dispersal mode."
+#| fig-height: 5
+#| fig-width: 10
+# A function that collects the location (group means) and scale (SDs) of a model
+loc_scale_tbl <- function(mod, label) {
+  loc <- mod_results(mod, mod = "disp_mode", group = "study_ID")$mod_table
+  data.frame(model     = label,
+             disp_mode = loc$name,
+             location  = loc$estimate,
+             lower     = loc$lowerCL,
+             upper     = loc$upperCL,
+             sigma     = sqrt(mod$tau2))   # heterogeneity SD for each level
+}
+
+ls_tbl <- bind_rows(loc_scale_tbl(m3_ls, "Model 3: lnRR"),
+                    loc_scale_tbl(m4_ls, "Model 4: lnCVR"))
+
+# Top: location (means with 95% CIs)
+p_loc <- ggplot(ls_tbl, aes(x = location, y = disp_mode)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0.15, orientation = "y") +
+  geom_point(size = 3, colour = pal["red"]) +
+  facet_wrap(~ model, scales = "free_x") +
+  labs(x = "Location: mean effect (95% CI)", y = NULL)
+
+# Bottom: scale (heterogeneity SDs)
+p_scale <- ggplot(ls_tbl, aes(x = sigma, y = disp_mode)) +
+  geom_col(fill = pal["dark"], width = 0.6) +
+  facet_wrap(~ model, scales = "free_x") +
+  labs(x = "Scale: heterogeneity SD (σ)", y = NULL)
+
+p_loc / p_scale   # one above the other with patchwork
+```
+
+# Your turn
+
+1. Refit Models 3 and 4 using `thermal_strategy` (ectotherm vs endotherm) as the moderator. With only `r sum(ce$thermal_strategy == "Endotherm")` endotherm effect sizes, how precise are the scale estimates?
+2. Using `rma()` with `scale = ~ log(dist_km)`, test whether the heterogeneity in lnRR increases with how far the range edge is from the core.
+3. **Extension:** fit Model 2 and Models 3–4 to the simulated warming data used in the [activities](../activities/activity-3-meta-regression.qmd) (`data/sim_contrast.csv`), where the **true** lnCVR is 0.15. Do your estimates recover it?
+
+::: {.callout-tip collapse="true"}
+## Answers
+```{r}
+#| label: your-turn-answers
+
+# 1. Thermal strategy as the moderator (Model 3 shown; Model 4 is the same with lnCVR)
+m3_ts <- rma.mv(yi = lnRR,
+                V = v_lnRR,
+                mods = ~ thermal_strategy,
+                random = list(~ 1 | study_ID,
+                              ~ thermal_strategy | es_ID),
+                struct = "DIAG",
+                test = "t",
+                dfs = "contain",
+                data = ce)
+
+round(m3_ts$tau2, 4)   # within-study variance for ectotherms and endotherms
+
+# 2. Does heterogeneity change with the distance between the core and the edge?
+m3_dist <- rma(yi = lnRR,
+               vi = v_lnRR,
+               mods = ~ log(dist_km),
+               scale = ~ log(dist_km),
+               data = ce)
+
+summary(m3_dist)
+```
+Variance components estimated from few effect sizes or studies are very imprecise – treat scale results from small groups as exploratory.
+:::
+
+# Writing it up
+
+::: {.writeup}
+Range-edge populations `r if (m1_lnRR$pval < 0.05) "differed" else "did not differ significantly"` from core populations in mean physiology (lnRR = `r sprintf("%.3f", m1_lnRR$b[1])`, 95% CI `r sprintf("%.3f", m1_lnRR$ci.lb)` to `r sprintf("%.3f", m1_lnRR$ci.ub)`). Relative variability (lnCVR) was `r sprintf("%.0f", 100 * abs(exp(m2_lnCVR$b[1]) - 1))`% `r ifelse(m2_lnCVR$b[1] > 0, "higher", "lower")` in edge populations (lnCVR = `r sprintf("%.3f", m2_lnCVR$b[1])`, 95% CI `r sprintf("%.3f", m2_lnCVR$ci.lb)` to `r sprintf("%.3f", m2_lnCVR$ci.ub)`; *p* `r fmt_p(m2_lnCVR$pval)`). A location-scale model allowing within-study heterogeneity in lnRR to differ among dispersal modes `r if (anova(m3_ls, m3_hom)$pval < 0.05) "fitted the data better" else "did not fit the data better"` than a homoscedastic model (LRT = `r sprintf("%.2f", anova(m3_ls, m3_hom)$LRT)`, *p* `r fmt_p(anova(m3_ls, m3_hom)$pval)`), with heterogeneity SDs of `r paste(sprintf("%.2f (%s)", sqrt(m3_ls$tau2), tolower(levels(ce$disp_mode))), collapse = ", ")`.
+:::
+
+# References
+
+<div id="refs"></div>
+
+<br>

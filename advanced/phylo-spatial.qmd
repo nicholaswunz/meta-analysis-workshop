@@ -1,0 +1,490 @@
+---
+title: "Advanced: phylogenetic and spatial meta-analysis"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis (including spatial correlation structures)
+               ape,         # phylogenetic trees
+               patchwork)   # combine ggplots
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+# One framework, two kinds of distance
+
+| | Phylogenetic | Spatial |
+|---|---|---|
+| Unit | species | site / population |
+| Distance | branch length (patristic distance) | geographic distance (km) |
+| Correlation | Brownian motion: shared branch length (`vcv(tree, corr = TRUE)`); or decaying with distance | decays with distance, e.g., exponential $\rho(d) = e^{-d/\phi}$ |
+| `metafor` | `R = list(phylo = A)` or `struct = "SPEXP"` + `dist =` | `struct = "SPEXP"` (or `"SPGAU"`, ...) + `dist =` |
+| `brms` | `(1 | gr(phylo, cov = A))` | `gp(x, y)` or `(1 | gr(site, cov = Sigma))` |
+
+```{r}
+#| label: fig-decay
+#| echo: false
+#| fig-cap: "Exponential and Gaussian correlation functions for a range parameter of 300 (km or branch-length units). The range, φ, is the distance at which the correlation of an exponential function has fallen to e⁻¹ ≈ 0.37."
+#| fig-height: 3.5
+# Correlation at each distance for a range parameter of 300
+decay <- tibble(d = seq(0, 1500, by = 5)) %>%
+  mutate(`Exponential (SPEXP)` = exp(-d / 300),
+         `Gaussian (SPGAU)`    = exp(-(d / 300)^2)) %>%
+  pivot_longer(cols = -d, names_to = "structure", values_to = "correlation")
+
+ggplot(decay, aes(x = d, y = correlation, colour = structure)) +
+  geom_hline(yintercept = exp(-1), linetype = "dotted", colour = "grey50") +
+  geom_vline(xintercept = 300, linetype = "dotted", colour = "grey50") +
+  geom_line(linewidth = 1.2) +
+  scale_colour_manual(values = unname(pal[c("red", "dark")]), name = NULL) +
+  labs(x = "Distance", y = "Correlation between random effects")
+```
+
+---
+
+# 1. Phylogenetic meta-analysis: BM vs an exponential (OU-like) model
+
+In the [non-independence tutorial](../models/non-independence.qmd), we assumed **Brownian motion** (BM): the correlation between two species equals their proportion of shared history. An alternative lets correlation decay **exponentially** with patristic distance, $\rho = e^{-d/\phi}$, which corresponds to an Ornstein–Uhlenbeck process with $\alpha = 1/\phi$ [@Mizuno2026]. We compare them using the dive data set from the [meta-regression tutorial](meta-regression.qmd).
+
+```{r}
+#| label: phylo-data
+# 1. Download the data and tidy the species names (as in the meta-regression tutorial)
+dive <- read.csv("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/contrast_lab_dataset.csv")
+
+dive$species <- str_trim(dive$species)
+dive$species <- str_replace_all(dive$species, " ", "_")
+dive$species <- str_replace(dive$species, "Trachemys_scripta_elegans", "Trachemys_scripta")
+
+dive$phylo <- dive$species      # copy of species for the phylogenetic random effect
+dive$es_ID <- 1:nrow(dive)      # effect size ID
+dive$const <- 1                 # a single 'group' that contains every row (needed for SPEXP)
+
+# 2. Calculate lnRR_Q10 and its sampling variance
+lnRR_Q10 <- function(t1, t2, r1, r2, sd1, sd2, n1, n2) {
+  scale_10   <- 10 / (t2 - t1)
+  lnRR_Q10   <- scale_10 * log(r2 / r1)
+  V_lnRR_Q10 <- scale_10^2 * (sd1^2 / (n1 * r1^2) + sd2^2 / (n2 * r2^2))
+  data.frame(lnRR_Q10, V_lnRR_Q10)
+}
+
+q10_es <- lnRR_Q10(t1  = dive$t1,      t2  = dive$t2,
+                   r1  = dive$mean_t1, r2  = dive$mean_t2,
+                   sd1 = dive$sd_t1,   sd2 = dive$sd_t2,
+                   n1  = dive$n_t1,    n2  = dive$n_t2)
+
+dive <- cbind(dive, q10_es)
+
+# 3. Phylogeny
+tree <- read.tree("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/phylo_lab.nwk")
+tree <- keep.tip(tree, unique(dive$species))
+
+A       <- vcv(tree, corr = TRUE)       # Brownian motion correlation matrix
+D_phylo <- cophenetic.phylo(tree)       # patristic distances (2 x divergence time, Mya)
+
+# 4a. Brownian motion model
+phylo_bm <- rma.mv(yi = lnRR_Q10,
+                   V = V_lnRR_Q10,
+                   random = list(~ 1 | study_ID,
+                                 ~ 1 | es_ID,
+                                 ~ 1 | phylo),
+                   R = list(phylo = A),           # BM correlation matrix
+                   data = dive)
+
+# 4b. Exponential decay of the correlation with patristic distance
+phylo_exp <- rma.mv(yi = lnRR_Q10,
+                    V = V_lnRR_Q10,
+                    random = list(~ 1 | study_ID,
+                                  ~ 1 | es_ID,
+                                  ~ phylo | const),   # species effects correlated by distance
+                    struct = "SPEXP",                 # exponential decay
+                    dist = list(phylo = D_phylo),     # the distance matrix to use
+                    data = dive)
+
+summary(phylo_exp)
+
+# 5. Compare the two models
+phylo_compare <- data.frame(
+  model    = c("Brownian motion", "Exponential (OU-like)"),
+  estimate = c(phylo_bm$b[1],  phylo_exp$b[1]),
+  ci_lb    = c(phylo_bm$ci.lb, phylo_exp$ci.lb),
+  ci_ub    = c(phylo_bm$ci.ub, phylo_exp$ci.ub),
+  AIC      = c(AIC(phylo_bm),  AIC(phylo_exp))
+)
+
+phylo_compare
+```
+
+**Interpretation.** `rho` is the range on the branch-length scale (here, twice the divergence time in Mya). A lower AIC indicates a better *relative* fit among the candidate covariance structures – it is **not** evidence that traits evolved by an OU process [@Mizuno2026]. In practice, check whether the pooled mean is robust to the choice; here both models give very similar estimates.
+
+---
+
+# 2. Spatial meta-analysis
+
+## Data: plasticity of heat tolerance across eastern Australia
+
+`sim_spatial_arr.csv` contains **simulated** acclimation response ratios (ARR; change in CTmax per °C of acclimation temperature) for 40 populations of a widespread skink, from 17 studies. Populations close to each other experience similar climates and exchange genes, so their ARRs may be **spatially autocorrelated** beyond what latitude alone explains.
+
+```{r}
+#| label: spatial-data
+# Read the simulated data from the data folder
+arr_dat <- read.csv(here::here("data", "sim_spatial_arr.csv"))
+
+arr_dat$es_ID   <- 1:nrow(arr_dat)                                # effect size ID
+arr_dat$site_ID <- factor(arr_dat$site_ID)                        # site as a factor
+arr_dat$const   <- 1                                              # one group for SPEXP
+arr_dat$lat_c   <- arr_dat$latitude - mean(arr_dat$latitude)      # centred latitude
+
+head(arr_dat)
+```
+
+```{r}
+#| label: fig-map
+#| fig-cap: "Locations of the 40 populations, coloured by ARR. Nearby populations tend to have similar values."
+#| fig-height: 5
+#| fig-width: 6
+ggplot(arr_dat, aes(x = longitude, y = latitude, colour = ARR)) +
+  geom_point(size = 3.5) +
+  scale_colour_gradient(low = "#1A2533", high = "#e12744") +   # navy (low) to red (high)
+  labs(x = "Longitude (°E)", y = "Latitude (°N; negative = south)") +
+  theme(legend.position = "right")
+```
+
+## From coordinates to a distance matrix
+
+We need distances in kilometres between all pairs of sites, in the **same order as the levels** of `site_ID`. For global data, use ellipsoidal geodesic distances (e.g., `geosphere::distm(..., fun = distGeo)`); here, a great-circle (haversine) formula written in base R is accurate enough:
+
+```{r}
+#| label: dist
+# gc_dist_km(): great-circle distance matrix (km) from longitude/latitude in decimal degrees
+# (haversine formula: the shortest distance over the Earth's surface)
+gc_dist_km <- function(lon, lat, labels) {
+  # conversion factor from degrees to radians (trig functions in R use radians)
+  rad <- pi / 180
+  # outer() calls the function below for every pair of sites (i, j)
+  # and returns a k x k matrix of distances
+  D <- outer(seq_along(lon), seq_along(lon), function(i, j) {
+    # difference in latitude and longitude between sites i and j, in radians
+    dlat <- (lat[j] - lat[i]) * rad
+    dlon <- (lon[j] - lon[i]) * rad
+    # haversine term: combines the north-south and east-west separation,
+    # shrinking the east-west part by cos(latitude) because meridians converge at the poles
+    a <- sin(dlat / 2)^2 + cos(lat[i] * rad) * cos(lat[j] * rad) * sin(dlon / 2)^2
+    # central angle (2 * asin(sqrt(a))) times the Earth's mean radius (6371 km) = distance in km;
+    # pmin(1, ...) guards against rounding pushing sqrt(a) just above 1, where asin() returns NaN
+    2 * 6371 * asin(pmin(1, sqrt(a)))
+  })
+  # name the rows and columns with the site labels so sites can be looked up by name
+  dimnames(D) <- list(labels, labels)
+  D
+}
+
+# one row per site with its coordinates, sorted by site_ID so that the order
+# matches the factor levels of site_ID used in the model
+sites <- arr_dat %>%
+  distinct(site_ID, longitude, latitude) %>%
+  arrange(site_ID)
+
+# build the site-by-site distance matrix (km)
+D_km <- gc_dist_km(lon = sites$longitude,
+                   lat = sites$latitude,
+                   labels = as.character(sites$site_ID))
+
+# safety check: rma.mv() matches rows of the distance matrix to the levels of site_ID
+# by position, so stop with an error if the order differs
+stopifnot(identical(rownames(D_km), levels(arr_dat$site_ID)))   # order must match!
+
+# preview the distances (km, rounded) between the first four sites
+round(D_km[1:4, 1:4])
+```
+
+## Is there spatial signal?
+
+A quick diagnostic: after removing the latitudinal trend, do pairs of nearby populations have more similar residuals than distant pairs?
+
+```{r}
+#| label: fig-correlogram
+#| fig-cap: "Similarity of residual ARR (product of standardised residuals from a non-spatial model) against distance between populations. Positive values at short distances indicate spatial autocorrelation."
+#| fig-height: 3.4
+
+# 1. Fit a non-spatial model with latitude as a moderator
+mod_nonspatial <- rma.mv(yi = ARR,
+                         V = V_ARR,
+                         mods = ~ lat_c,
+                         random = list(~ 1 | study_ID,
+                                       ~ 1 | es_ID),
+                         data = arr_dat)
+
+# 2. Standardised residuals: what is left after removing the latitudinal trend
+res_std <- rstandard(mod_nonspatial)$z
+
+# 3. Every pair of effect sizes (i, j), counting each pair once
+pairs <- expand_grid(i = 1:nrow(arr_dat), j = 1:nrow(arr_dat)) %>%
+  filter(i < j)
+
+# Look up the distance between the two sites of each pair (by site name)
+site_i <- as.character(arr_dat$site_ID[pairs$i])
+site_j <- as.character(arr_dat$site_ID[pairs$j])
+pairs$dist <- D_km[cbind(site_i, site_j)]
+
+# Similarity: positive when both residuals are on the same side of the trend
+pairs$similarity <- res_std[pairs$i] * res_std[pairs$j]
+
+# 4. Average similarity within distance bins
+#    (narrower bins at short distances, where spatial correlation is strongest)
+correlogram <- pairs %>%
+  mutate(bin = cut(dist, breaks = c(0, 150, 300, 500, 800, 1200, 1800, 2600))) %>%
+  group_by(bin) %>%
+  summarise(dist = mean(dist),
+            similarity = mean(similarity),
+            n = n())
+
+ggplot(correlogram, aes(x = dist, y = similarity)) +
+  geom_hline(yintercept = 0, colour = "grey60") +
+  geom_line(colour = pal["red"]) +
+  geom_point(aes(size = n), colour = pal["red"]) +
+  guides(size = "none") +
+  labs(x = "Distance between populations (km)", y = "Mean residual similarity")
+```
+
+## Fitting the spatial model
+
+Following @Mizuno2026, we compare three random-effects structures, each with latitude as a moderator:
+
+```{r}
+#| label: spatial-models
+# 1. Unstructured: study and effect size random effects only
+sp_unstr <- rma.mv(yi = ARR,
+                   V = V_ARR,
+                   mods = ~ lat_c,
+                   random = list(~ 1 | study_ID,
+                                 ~ 1 | es_ID),
+                   test = "t",
+                   data = arr_dat)
+
+# 2. Combined: + a spatially correlated site effect (exponential decay with distance)
+sp_comb <- rma.mv(yi = ARR,
+                  V = V_ARR,
+                  mods = ~ lat_c,
+                  random = list(~ 1 | study_ID,
+                                ~ 1 | es_ID,
+                                ~ site_ID | const),   # spatial term indexed by site
+                  struct = "SPEXP",                   # exponential correlation function
+                  dist = list(site_ID = D_km),        # our distance matrix (km)
+                  test = "t",
+                  data = arr_dat)
+
+summary(sp_comb)
+
+# 3. The same model, using metafor's built-in great-circle distances from the coordinates
+sp_gcd <- rma.mv(yi = ARR,
+                 V = V_ARR,
+                 mods = ~ lat_c,
+                 random = list(~ 1 | study_ID,
+                               ~ 1 | es_ID,
+                               ~ longitude + latitude | const),
+                 struct = "SPEXP",
+                 dist = "gcd",                         # great-circle distance
+                 test = "t",
+                 data = arr_dat)
+
+# The estimated range (km) is the same either way
+c(rho_own_matrix = sp_comb$rho, rho_gcd = sp_gcd$rho)
+```
+
+```{r}
+#| label: spatial-compare
+# Compare the latitude slope, its SE and the model fit
+fitstats_tbl <- data.frame(
+  model          = c("Unstructured", "Combined (spatial)"),
+  latitude_slope = c(sp_unstr$b[2],  sp_comb$b[2]),
+  se_slope       = c(sp_unstr$se[2], sp_comb$se[2]),
+  AIC            = c(AIC(sp_unstr),  AIC(sp_comb)),
+  range_km       = c(NA,             sp_comb$rho)
+)
+
+fitstats_tbl
+
+# Likelihood-ratio test of the spatial term
+anova(sp_comb, sp_unstr)
+```
+
+## Comparing the non-spatial and spatial models visually
+
+```{r}
+#| label: fig-spatial-compare
+#| fig-cap: "Non-spatial (unstructured) vs spatial (exponential SPEXP) models. (A) Intercept (ARR at the mean latitude) and latitude slope with 95% CIs. (B) Fitted latitudinal trend with 95% confidence bands; points are populations, sized by precision. (C) Variance components: the spatial model moves part of the heterogeneity from the study and effect-size levels into a spatially structured term."
+#| fig-height: 8.5
+#| fig-width: 10
+# Colours for the two models
+model_cols <- c("Non-spatial" = "#1A2533", "Spatial (SPEXP)" = "#e12744")
+
+# (A) Fixed effects: intercept and latitude slope from each model -----------
+coef_tbl <- data.frame(
+  model    = rep(c("Non-spatial", "Spatial (SPEXP)"), each = 2),
+  term     = rep(c("Intercept (ARR at mean latitude)",
+                   "Latitude slope (per degree north)"), times = 2),
+  estimate = c(sp_unstr$b[, 1],  sp_comb$b[, 1]),
+  ci_lb    = c(sp_unstr$ci.lb,   sp_comb$ci.lb),
+  ci_ub    = c(sp_unstr$ci.ub,   sp_comb$ci.ub)
+)
+
+p_coef <- ggplot(coef_tbl, aes(x = estimate, y = model, colour = model)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(xmin = ci_lb, xmax = ci_ub),
+                width = 0.2, orientation = "y", linewidth = 0.9) +
+  geom_point(size = 3) +
+  facet_wrap(~ term, scales = "free_x") +
+  scale_colour_manual(values = model_cols, guide = "none") +
+  labs(x = "Estimate (95% CI)", y = NULL, title = "A  Fixed effects")
+
+# (B) Fitted latitudinal trend from each model -------------------------------
+
+# 100 latitudes across the observed range (and the centred version for the model)
+lat_grid <- data.frame(latitude = seq(min(arr_dat$latitude), max(arr_dat$latitude),
+                                      length.out = 100))
+lat_grid$lat_c <- lat_grid$latitude - mean(arr_dat$latitude)
+
+# Predictions (with 95% CIs) from each model
+pred_unstr <- as.data.frame(predict(sp_unstr, newmods = lat_grid$lat_c))
+pred_unstr$model    <- "Non-spatial"
+pred_unstr$latitude <- lat_grid$latitude
+
+pred_comb <- as.data.frame(predict(sp_comb, newmods = lat_grid$lat_c))
+pred_comb$model    <- "Spatial (SPEXP)"
+pred_comb$latitude <- lat_grid$latitude
+
+pred_tbl <- bind_rows(pred_unstr, pred_comb)
+
+p_trend <- ggplot() +
+  geom_point(data = arr_dat, aes(x = latitude, y = ARR, size = 1 / sqrt(V_ARR)),
+             colour = "grey45", alpha = 0.5) +
+  geom_ribbon(data = pred_tbl, aes(x = latitude, ymin = ci.lb, ymax = ci.ub, fill = model),
+              alpha = 0.18) +
+  geom_line(data = pred_tbl, aes(x = latitude, y = pred, colour = model),
+            linewidth = 1.1) +
+  scale_colour_manual(values = model_cols, name = NULL) +
+  scale_fill_manual(values = model_cols, name = NULL) +
+  guides(size = "none") +
+  labs(x = "Latitude (°N; negative = south)", y = "ARR (°C per °C)",
+       title = "B  Fitted latitudinal trend")
+
+# (C) Variance components of each model --------------------------------------
+vc_tbl <- data.frame(
+  model     = rep(c("Non-spatial", "Spatial (SPEXP)"), each = 3),
+  component = rep(c("Study", "Effect size", "Spatial (site)"), times = 2),
+  variance  = c(sp_unstr$sigma2, 0,               # the non-spatial model has no spatial term
+                sp_comb$sigma2,  sp_comb$tau2)
+)
+vc_tbl$component <- factor(vc_tbl$component,
+                           levels = c("Study", "Effect size", "Spatial (site)"))
+
+p_vc <- ggplot(vc_tbl, aes(x = model, y = variance, fill = component)) +
+  geom_col(width = 0.6, colour = "white") +
+  scale_fill_manual(values = unname(pal[c("dark", "pink", "red")]), name = NULL) +
+  labs(x = NULL, y = "Variance", title = "C  Variance components")
+
+# Combine the three panels with patchwork
+p_coef / (p_trend + p_vc + plot_layout(widths = c(1.6, 1))) +
+  plot_layout(heights = c(1, 1.3))
+```
+
+**What the figure shows**
+
+- **Panel A:** the latitude slope is `r sprintf("%.4f", sp_unstr$b[2])` in the non-spatial model and `r sprintf("%.4f", sp_comb$b[2])` in the spatial model, and its standard error `r if_else(sp_comb$se[2] > sp_unstr$se[2], "increases", "decreases")` from `r sprintf("%.4f", sp_unstr$se[2])` to `r sprintf("%.4f", sp_comb$se[2])`. Once nearby populations are allowed to resemble each other, they no longer count as fully independent replicates of the latitude effect.
+- **Panel B:** both models describe the same latitudinal trend. The spatial model's confidence band is `r if_else(mean(pred_tbl$ci.ub[pred_tbl$model == "Spatial (SPEXP)"] - pred_tbl$ci.lb[pred_tbl$model == "Spatial (SPEXP)"]) > mean(pred_tbl$ci.ub[pred_tbl$model == "Non-spatial"] - pred_tbl$ci.lb[pred_tbl$model == "Non-spatial"]), "wider", "narrower")`, reflecting the different estimate of independent information.
+- **Panel C:** total heterogeneity is similar in the two models (`r sprintf("%.4f", sum(sp_unstr$sigma2))` vs `r sprintf("%.4f", sum(sp_comb$sigma2) + sp_comb$tau2)`), but it is partitioned differently. Most of what the non-spatial model treats as independent variation among effect sizes is attributed by the spatial model to a spatially structured site effect (`r sprintf("%.0f", 100 * sp_comb$tau2 / (sum(sp_comb$sigma2) + sp_comb$tau2))`% of the total). In other words, much of the 'unexplained' variation is shared by neighbouring populations.
+
+## Interpreting
+
+- `tau^2` is the spatial variance and `rho` the **range** (km): the estimated spatial correlation falls to 0.37 at ~`r round(sp_comb$rho)` km (the simulation used 300 km).
+- Including the spatial term changes the standard error of the latitude slope, because nearby populations no longer count as fully independent replicates of the latitude effect.
+- Spatial range parameters are often **weakly identified**: profile the likelihood (`profile(sp_comb, tau2 = 1)`), try different starting values, and report sensitivity to the correlation function (`"SPGAU"`, `"SPSPH"`) [@Mizuno2026].
+
+```{r}
+#| label: fig-fitted-decay
+#| fig-cap: "Estimated spatial correlation between population effects as a function of distance (exponential model), compared with the value used to simulate the data."
+#| fig-height: 3
+# Estimated vs true spatial correlation at each distance
+fitted_decay <- tibble(d = 0:1500) %>%
+  mutate(Estimated = exp(-d / sp_comb$rho),
+         `True (simulation)` = exp(-d / 300)) %>%
+  pivot_longer(cols = -d, names_to = "curve", values_to = "correlation")
+
+ggplot(fitted_decay, aes(x = d, y = correlation, linetype = curve)) +
+  geom_line(linewidth = 1, colour = pal["red"]) +
+  labs(x = "Distance (km)", y = "Spatial correlation", linetype = NULL)
+```
+
+## brms and glmmTMB versions
+
+::: {.panel-tabset}
+## brms (Gaussian process)
+```{r}
+#| eval: false
+library(brms)
+# Project coordinates to km on a local plane (adequate for regional data)
+arr_dat$x_km <- (arr_dat$longitude - mean(arr_dat$longitude)) * 111.32 * cos(mean(arr_dat$latitude) * pi / 180)
+arr_dat$y_km <- (arr_dat$latitude - mean(arr_dat$latitude)) * 110.57
+
+sp_brms <- brm(
+  bf(ARR | se(sqrt(V_ARR), sigma = TRUE) ~ lat_c + (1 | study_ID) +
+       gp(x_km, y_km, cov = "exponential", scale = FALSE)),   # exponential GP over space
+  data = arr_dat, family = gaussian(),
+  prior = c(prior(normal(0, 1), class = "Intercept"),
+            prior(student_t(3, 0, 0.5), class = "sd"),
+            prior(student_t(3, 0, 0.5), class = "sdgp"),
+            prior(lognormal(log(300), 1), class = "lscale")),   # weakly informative range (km)
+  chains = 4, cores = 4, iter = 4000, warmup = 2000, seed = 2026,
+  control = list(adapt_delta = 0.99), file = here::here("brms_fits", "sp_brms"))
+```
+
+## brms (fixed spatial matrix)
+```{r}
+#| eval: false
+# If you prefer a fixed correlation matrix (e.g., with the range taken from the metafor fit)
+Sigma <- exp(-D_km / 300)
+sp_brms_fixed <- brm(
+  ARR | se(sqrt(V_ARR)) ~ lat_c + (1 | study_ID) + (1 | es_ID) + (1 | gr(site_ID, cov = Sigma)),
+  data = arr_dat, data2 = list(Sigma = Sigma), chains = 4, cores = 4)
+```
+:::
+
+# Your turn
+
+1. Refit `sp_comb` with `struct = "SPGAU"`. Compare AIC and the estimated range.
+2. Remove `lat_c` from the spatial model. What happens to the spatial variance, and why?
+
+::: {.callout-tip collapse="true"}
+## Answers
+```{r}
+#| label: your-turn-answers
+
+# 1. Gaussian instead of exponential correlation function
+sp_gau <- update(sp_comb, struct = "SPGAU")
+
+c(AIC_exp = AIC(sp_comb), AIC_gau = AIC(sp_gau))   # model fit
+c(rho_exp = sp_comb$rho,  rho_gau = sp_gau$rho)    # estimated range (km)
+
+# 2. Remove latitude from the spatial model
+sp_nolat <- update(sp_comb, mods = ~ 1)
+
+c(spatial_var_with_lat = sp_comb$tau2, spatial_var_without_lat = sp_nolat$tau2)
+```
+Without the latitude moderator, the broad-scale latitudinal gradient is absorbed by the spatial random effect, inflating the spatial variance and range. Spatial random effects and spatially structured moderators compete for the same signal.
+:::
+
+# Writing it up
+
+::: {.writeup}
+To account for spatial non-independence among populations, we included a spatially structured random effect with an exponential correlation function of great-circle distance between sites (`struct = "SPEXP"` in metafor), alongside random effects for study and effect size [@Mizuno2026]. Acclimation capacity `r if_else(sp_comb$b[2] > 0, "increased", "decreased")` towards the tropics (slope = `r sprintf("%.4f", sp_comb$b[2])` °C °C⁻¹ per degree of latitude northwards, 95% CI `r sprintf("%.4f", sp_comb$ci.lb[2])` to `r sprintf("%.4f", sp_comb$ci.ub[2])`). Residual spatial autocorrelation was estimated with a range of `r round(sp_comb$rho)` km (spatial variance = `r sprintf("%.4f", sp_comb$tau2)`), and the spatial model `r if_else(AIC(sp_comb) - AIC(sp_unstr) < -2, "was clearly preferred over", "fitted the data similarly to")` the non-spatial model (ΔAIC = `r sprintf("%.1f", AIC(sp_comb) - AIC(sp_unstr))`; likelihood-ratio test *p* `r fmt_p(anova(sp_comb, sp_unstr)$pval)`). We therefore report the spatial model as a sensitivity analysis showing that the latitudinal trend is robust to spatial autocorrelation.
+:::
+
+# References
+
+<div id="refs"></div>
+
+<br>

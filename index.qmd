@@ -1,0 +1,89 @@
+---
+title: "Meta-analysis Workshop"
+subtitle: "For Ecological and Evolutionary Physiologists"
+toc: true
+---
+
+# Welcome
+
+Comparative physiologists study how traits such as metabolic rate, thermal tolerance, heart rate or hormone levels vary among individuals, populations and species, and how they respond to the environment. Over the last few decades, thousands of experiments have measured these traits – often in small samples, in different species and under different conditions.
+
+**Meta-analysis** is the statistical toolkit that lets us combine these studies into a single quantitative answer, ask *why* results differ, and check whether the published literature might be biased.
+
+This series of workshops will teach you the workflow of conducting a meta-analytic study, from turning a biological question into a search string, to calculating effect sizes, fitting multilevel meta-analytic models with `metafor`, accounting for shared controls and phylogeny, explaining heterogeneity with meta-regression, testing for publication bias, and finally modelling *variability* itself with location-scale models.
+
+
+::: {.session-banner}
+
+## Prerequisites
+
+The workshop is designed for **graduate students and comparative physiologists** who are comfortable with R and familiar with `tidyverse` syntax. We expect that students know how to load data (e.g., .csv files) into R, and how to check and tidy raw data. Real ecological data will be messy and full of errors that require cleaning, tidying and transforming before effect size calculations and meta-analysis can be performed. 
+
+If you need a refresher on this, I have a separate workshop that goes into the details of checking data quality and tidying data for analysis: [ECS200 – Research Methods in Ecology](https://nicholaswu.quarto.pub/ecs200/).
+
+>All statistical techniques have in common the problem of ‘*rubbish in, rubbish out*’
+
+:::
+
+# Learning outcomes
+
+Over the course of this workshop, you will learn:
+
+- **Fundamentals of meta-analysis**: Understanding what meta-analysis is and when to use it
+- **Effect sizes**: How to calculate and interpret different effect size metrics
+- **Statistical models**: Fixed-effect vs. random-effects models and when to use each
+- **Heterogeneity**: Understanding and quantifying variation in effect sizes
+- **Meta-regression**: Exploring moderators of effect sizes
+- **Publication bias**: Detecting and accounting for biases in the literature
+- **Advanced topics**: Multilevel models, complex non-independence, and phylogenetic and spatial meta-analysis
+
+# Workshop structure
+
+The material is grouped into three sections. Each section has a **self-learning** part, where you work through the lecture pages on this website, and a **hands-on** activity, where you apply what you have learnt to simulated datasets with known answers. The sections can be run in any order that suits your schedule, although each builds on the one before.
+
+| | Self-learning (lecture pages) | Hands-on activity |
+|---|---|---|
+| **Foundations** | [What is meta-analysis?](foundations/what-is-meta-analysis.qmd) · [Systematic review & search](foundations/systematic-review.qmd) · [Effect sizes](foundations/effect-sizes.qmd) | [Activity 1](activities/activity-1-effect-sizes.qmd): effect sizes in Excel and R; fixed vs random effects |
+| **Models** | [Fixed, random & multilevel models](models/fixed-random-multilevel.qmd) · [Heterogeneity](models/heterogeneity.qmd) · [Complex non-independence](models/non-independence.qmd) | [Activity 2](activities/activity-2-multilevel.qmd): multilevel models with shared controls & phylogeny; $I^2$; orchard plots; writing results |
+| **Advanced** | [Meta-regression](advanced/meta-regression.qmd) · [Publication bias](advanced/publication-bias.qmd) · [Variability & location-scale](advanced/variability-location-scale.qmd) · [Phylogenetic & spatial](advanced/phylo-spatial.qmd) | [Activity 3](activities/activity-3-meta-regression.qmd): meta-regression with sex & body size; small-study & time-lag bias; writing results |
+
+: {tbl-colwidths="[16,50,34]"}
+
+
+# Datasets
+
+All data live in the `data/` folder of the workshop project (see the [data dictionary](resources/data-dictionary.qmd)). On the lecture pages, the real datasets are downloaded directly from the authors' public repositories, so you need an internet connection; local copies are also provided in `data/`.
+
+**Real datasets** (used in the worked examples on the lecture pages; redistributed from the authors' public repositories):
+
+- @WuSeebacher2022 – correlations between physiology and movement (activity, exploration, dispersal), and comparisons of range-core vs range-edge populations.
+- @Rodgers2021 – dive duration of ectothermic vertebrates at two temperatures, with a phylogeny (used for $lnRR_{Q_{10}}$, shared controls and phylogenetic models).
+- @Arnold2021 – correlations between resting metabolic rate and fitness (used for publication bias).
+
+**Simulated datasets** (used in the hands-on activities; generated by `scripts/simulate_data.R` with *known* true parameters so you can check whether your model recovers the truth):
+
+- `sim_correlation.csv` – 50 correlations between metabolic rate and whole-organism performance.
+- `sim_contrast.csv` – 50 treatment–control contrasts of the effect of experimental warming on physiological rates, including shared controls.
+- `sim_tree.tre` – a 15-species vertebrate phylogeny matching the species in both datasets.
+- `sim_spatial_arr.csv` – 40 populations with coordinates, for the spatial meta-analysis demonstration.
+
+## Acknowledgements and sources
+
+This workshop is built on, and adapts material from, several excellent open resources. Please cite them if you use this material:
+
+- *Meta-Analysis Workshop* by Daniel Noble and Patrice Pottier ([website](https://daniel1noble.github.io/meta-analysis_workshop/)) and the review by Noble et al. [-@Noble2022].
+- *Meta-analysis tutorial* by Shinichi Nakagawa and colleagues ([website](https://itchyshin.github.io/Meta-analysis_tutorial/)).
+- *One dataset, four meta-analyses* [@Lacza2025] for the variability and location-scale material.
+- *A unified framework for phylogenetic and spatial meta-analysis* [@Mizuno2026] for the phylogenetic and spatial material.
+
+The R packages doing the heavy lifting are `metafor` [@Viechtbauer2010], `orchaRd` [@Nakagawa2023] and, for Bayesian alternatives, `brms` [@Burkner2017].
+
+# Contact
+
+For questions or feedback, please contact [Nicholas Wu](mailto:nicholas.wu@murdoch.edu.au).
+
+# References
+
+<div id="refs"></div>
+
+<br>

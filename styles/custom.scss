@@ -1,0 +1,141 @@
+/*-- scss:defaults --*/
+
+// ---- Colour palette (matched to the book theme: theme.scss / theme.css) ----
+$book-crimson:   #e12744;   // primary, links, active items
+$book-orange:    #E54D23;   // hover / highlight
+$book-pink:      #fecdd0;   // active tabs / pills
+$book-warm-grey: #EEECEA;   // TOC active background, rules, panels
+$book-ink:       #222322;   // titles and body text accents
+$book-navy:      #1A2533;   // dark accent (as in the book's circle buttons)
+
+// main
+$primary:   $book-crimson;
+$secondary: $book-navy;
+$link-color: $book-crimson;
+
+// navbar (light, like the book's docked sidebar)
+$navbar-bg: #ffffff;
+$navbar-fg: $book-ink;
+$navbar-hl: $book-orange;
+
+// sidebar
+$sidebar-hl: $book-orange;
+
+// table of contents
+$toc-color: #000;
+$toc-active-border: $book-crimson;
+$toc-active-background: $book-warm-grey;
+
+// typography and code
+$font-family-sans-serif: "Source Sans 3", "Source Sans Pro", -apple-system, "Segoe UI", Roboto, sans-serif;
+$headings-font-weight: 600;
+$code-block-bg: #F7F6F4;
+
+/*-- scss:rules --*/
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap');
+
+:root {
+  --bs-nav-pills-link-active-bg: #{$book-pink};
+}
+
+h2 { border-bottom: 1px solid $book-warm-grey; padding-bottom: .1rem; margin-top: 1.5rem; }
+
+// ---- Sidebar and navigation (from the book theme) ----
+.sidebar-title { color: $book-ink; }
+
+// day / section headings in the sidebar
+.sidebar-item-section > .sidebar-item-container .menu-text {
+  font-weight: 700;
+  color: $book-ink;
+}
+
+div.sidebar-item-container .active {
+  font-weight: bold;
+  color: $book-crimson !important;
+}
+
+.sidebar nav[role=doc-toc] ul>li>a.active,
+.sidebar nav[role=doc-toc] ul>li>ul>li>a.active {
+  font-weight: bold;
+}
+
+.sidebar-navigation a:hover { color: $book-orange !important; }
+
+// active tabs (panel-tabsets) and TOC entries get the book's pink
+.nav-link.active { background-color: $book-pink !important; }
+
+// ...but keep the top navbar clean: no pink block, and no "active" colour
+// (Quarto can flag "Home" as active on every page; the sidebar shows the current page)
+.navbar .nav-link.active {
+  background-color: transparent !important;
+  color: $book-ink !important;
+}
+.navbar .nav-link:hover, .navbar .nav-link.active:hover { color: $book-orange !important; }
+.navbar { border-bottom: 3px solid $book-crimson !important; box-shadow: none !important; }
+.navbar-title { color: $book-ink !important; font-weight: 700; }
+
+// navbar dropdown menus (e.g. Resources): dark, readable text
+.navbar .dropdown-menu { background-color: #ffffff; }
+.navbar .dropdown-menu .dropdown-item,
+.navbar .dropdown-menu .dropdown-item .menu-text {
+  color: $book-ink !important;
+}
+.navbar .dropdown-menu .dropdown-item:hover,
+.navbar .dropdown-menu .dropdown-item:focus,
+.navbar .dropdown-menu .dropdown-item:hover .menu-text,
+.navbar .dropdown-menu .dropdown-item:focus .menu-text {
+  color: $book-orange !important;
+  background-color: $book-warm-grey !important;
+}
+
+// page "</> Code" menu (Show All Code / Hide All Code / View Source): same dark text
+.quarto-title-block .dropdown-menu .dropdown-item,
+#quarto-code-tools-menu + .dropdown-menu .dropdown-item {
+  color: $book-ink !important;
+}
+.quarto-title-block .dropdown-menu .dropdown-item:hover,
+#quarto-code-tools-menu + .dropdown-menu .dropdown-item:hover {
+  color: $book-orange !important;
+  background-color: $book-warm-grey !important;
+}
+
+// per-chunk "Show / hide code" toggles
+details.code-fold > summary { color: $book-crimson; font-weight: 600; }
+details.code-fold > summary:hover { color: $book-orange; }
+
+.footnotes { font-size: .9rem; color: var(--bs-gray-700); }
+
+// ---- Session banner at the top of each page ----
+// morning (self-learning) = navy / warm grey; afternoon practical = crimson / pink
+.session-banner {
+  border-left: 6px solid $book-navy;
+  background: $book-warm-grey;
+  padding: .75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.25rem;
+  font-size: .95rem;
+}
+.session-banner.practical {
+  border-left-color: $book-crimson;
+  background: #FFF1F2;          // lighter tint of $book-pink
+}
+
+// ---- "Writing it up" boxes look like a manuscript excerpt ----
+.writeup {
+  font-family: Georgia, "Times New Roman", serif;
+  background: #FBFAF9;
+  border: 1px solid $book-warm-grey;
+  border-left: 4px solid $book-crimson;
+  border-radius: 6px;
+  padding: .9rem 1.2rem;
+  line-height: 1.6;
+}
+
+// ---- Time markers ----
+.timing { color: $book-orange; font-size: .85rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+
+table { font-size: .92rem; }
+.figure-caption, figcaption { font-size: .88rem; color: #4A4846; }
+
+// ---- References ----
+#refs { font-size: 0.9rem; }

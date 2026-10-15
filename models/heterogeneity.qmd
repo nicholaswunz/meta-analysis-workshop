@@ -1,0 +1,565 @@
+---
+title: "Heterogeneity: Q, I² and prediction intervals"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis
+               orchaRd)     # I2, CVH2, M2 and orchard plots
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+In physiology, ecology and evolution, we deal with many different populations, species, experimental designs, etc. As such, we're not just interested in understanding '**what the overall effect**' actually is (in fact, we may not even care in many cases), but we are mainly focused on attempting to understand **what factors (e.g., biological, methodological) explain variation in effects** [@Noble2022; @Lag2010; @Gurevitch2018]. Understanding and quantifying how much variability in effects exists, whether this is more than we would expect by chance, and what factors explain this variation, is a primary goal of meta-analysis.
+
+Meta-analytic mean estimates need to be interpreted in the context of how much variation in effects exists within and across studies. As such, reporting upon measures of variability, or what is referred to as 'heterogeneity' in meta-analysis, is essential to meta-analysis and should never be ignored (even though, unfortunately, it often is) [@ODea2021; @NakagawaSantos2012; @Borenstein2019; @Nakagawa2017; @Gurevitch2018]. 
+
+There are a number of important metrics of heterogeneity that are commonly used and reported upon in the meta-analytic literature [@NakagawaSantos2012; @Borenstein2019; @Nakagawa2017]. In this tutorial, we'll overview how to calculate and interpret many of the common types, and what they mean for interpreting the meta-analytic mean. Understanding the consistency of results across studies tells us a great deal about how likely an effect is to be detected in future studies and whether we can draw broad, general conclusions.
+
+# Two sources of variation
+
+Observed effect sizes vary for two reasons:
+
+1. **Sampling error** – studies measure a finite number of animals. This is known: $v_{i}$.
+2. **Heterogeneity** – true effects genuinely differ (species, temperatures, life stages, protocols). This is estimated: $\tau^2$ (or the $\sigma^2$ components in multilevel models).
+
+```{r}
+#| label: fig-het-concept
+#| echo: false
+#| fig-cap: "Two meta-analyses with the same mean (dashed) and the same sampling variances. Left: no heterogeneity – all scatter is sampling error, and CIs overlap the mean. Right: true effects differ (τ = 0.25); observed effects scatter well beyond what sampling error predicts."
+#| fig-height: 4
+# Simulate 15 studies with a true mean of 0.3
+set.seed(3)
+k <- 15
+
+het_demo <- tibble(study = 1:k,
+                   vi = runif(k, 0.004, 0.02)) %>%   # sampling variances
+  mutate(`No heterogeneity (τ = 0)`      = 0.3 + rnorm(k, 0, sqrt(vi)),
+         `High heterogeneity (τ = 0.25)` = 0.3 + rnorm(k, 0, 0.25) + rnorm(k, 0, sqrt(vi))) %>%
+  pivot_longer(cols = -c(study, vi), names_to = "scenario", values_to = "yi") %>%
+  mutate(scenario = fct_rev(scenario),            # show 'No heterogeneity' first
+         lower = yi - 1.96 * sqrt(vi),            # 95% CI of each effect size
+         upper = yi + 1.96 * sqrt(vi))
+
+ggplot(het_demo, aes(x = yi, y = study)) +
+  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  geom_errorbar(aes(xmin = lower, xmax = upper),
+                width = 0, orientation = "y", colour = "grey50") +
+  geom_point(colour = pal["red"], size = 2.3) +
+  facet_wrap(~ scenario) +
+  labs(x = "Effect size", y = "Study")
+```
+
+The most commonly encountered measures of heterogeneity in comparative physiology, and indeed ecology and evolution more generally, are the results of *Q*-tests, $I^2$ metrics (or raw $\tau^2$ or variance estimates) and, less commonly, prediction intervals.
+
+These measures of heterogeneity (even if just a few) should always be presented alongside meta-analytic mean effect size estimates because they tell the reader a great deal about the 'consistency' of results (e.g., prediction intervals, total heterogeneity) or the relative contribution of different factors to effect size variation (i.e., different measures of $I^2$). We'll overview these different metrics and show how to calculate and interpret them in meta-analyses. 
+
+For the purpose of this tutorial, we'll assume that the following multilevel meta-analytic model is fitted, as described in the [multilevel model tutorial](fixed-random-multilevel.qmd). If you can't quite remember all the notation, we recommend going back to review that page.
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{j} &\sim N(0, \tau^2) \\
+spp_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+# Calculations
+
+To illustrate our points, we will use the two multilevel models developed in the previous tutorial: `mod_ml`, which uses *Zr* (correlation) effect sizes, and `MLMA`, which uses ARR (contrast) effect sizes. Let's refit both models.
+
+```{r}
+#| label: refit-zr
+
+# 1. Zr model (mod_ml) ---------------------------------------------------
+
+# Download the data and keep only the effect sizes for metabolic traits
+wu_met <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
+  filter(trait == "Metabolism")
+
+# Give every effect size its own ID
+wu_met$es_ID <- 1:nrow(wu_met)
+
+# Calculate Zr (yi) and its sampling variance (vi)
+wu_met <- escalc(measure = "ZCOR",
+                 ri = corr_coeff,
+                 ni = sample_size,
+                 data = wu_met)
+
+# Multilevel meta-analytic model
+mod_ml <- rma.mv(yi = yi,
+                 V = vi,
+                 random = list(~ 1 | study_ID,    # between-study random effect
+                               ~ 1 | es_ID),      # within-study (effect size) random effect
+                 method = "REML",
+                 test = "t",
+                 dfs = "contain",
+                 data = wu_met)
+```
+
+```{r}
+#| label: refit-arr
+
+# 2. ARR model (MLMA) ----------------------------------------------------
+
+# Download the data
+asr_dat <- read.csv("https://osf.io/qn2af/download")
+
+# Function to calculate ARR and its sampling variance (see the Effect sizes page)
+arr <- function(m_high, m_low, sd_high, sd_low, n_high, n_low, t_high, t_low) {
+  t_diff <- t_high - t_low
+  ARR    <- (m_high - m_low) / t_diff
+  V_ARR  <- (1 / t_diff)^2 * (sd_high^2 / n_high + sd_low^2 / n_low)
+  data.frame(ARR, V_ARR)
+}
+
+# Calculate the effect sizes and add them to the data
+arr_es <- arr(m_high  = asr_dat$mean_high,     m_low  = asr_dat$mean_low,
+              sd_high = asr_dat$sd_high,       sd_low = asr_dat$sd_low,
+              n_high  = asr_dat$n_high_adj,    n_low  = asr_dat$n_low_adj,
+              t_high  = asr_dat$acc_temp_high, t_low  = asr_dat$acc_temp_low)
+
+asr_dat <- cbind(asr_dat, arr_es)
+
+# Keep only the effect sizes for females
+asr_dat <- asr_dat %>%
+  filter(sex == "female")
+
+# Multilevel meta-analytic model
+MLMA <- rma.mv(yi = ARR,
+               V = V_ARR,
+               random = list(~ 1 | species_ID,
+                             ~ 1 | study_ID,
+                             ~ 1 | es_ID),
+               method = "REML",
+               test = "t",
+               dfs = "contain",
+               data = asr_dat)
+```
+
+::: {.panel-tabset}
+
+# I²: the proportion of variation that is heterogeneity
+
+## Proportion of total heterogeneity: $I_{total}^2$
+
+$I^2$ estimates are probably most commonly presented in the literature [@Higgins2003; @Higgins2002; @Nakagawa2017; @Senior2016; @Borenstein2019]. There are different forms of $I^2$ that can be calculated, but the one that describes the proportion of effect size variation after accounting for total sampling variation is $I_{total}^2$ [@NakagawaSantos2012]. 
+
+Assuming we're using the multilevel model described above, it's calculated as follows:
+
+$$
+I^2_{total} = \frac{\sigma^2_{study} + \sigma^2_{phylogeny} + \sigma^2_{species} + \sigma^2_{residual}}{\sigma^2_{study} + \sigma^2_{phylogeny} + \sigma^2_{species} + \sigma^2_{residual} +\sigma^2_{m}}
+$$ {#eq-itot}
+
+where $\sigma^2_{total} = \sigma^2_{study} + \sigma^2_{phylogeny} + \sigma^2_{species} + \sigma^2_{residual} +\sigma^2_{m}$ is the total effect size variance and $\sigma^2_{m}$ is the 'typical' sampling error variance calculated as:
+
+::: {.callout-note}
+@eq-itot is the general form and may include a phylogenetic variance component ($\sigma^2_{phylogeny}$) when a phylogenetic correlation structure is added to the model. The `mod_ml` model fitted here includes only study and effect size (residual) random effects, so $\sigma^2_{phylogeny} = \sigma^2_{species} = 0$ and the numerator reduces to $\sigma^2_{study} + \sigma^2_{residual}$.
+:::
+
+$$
+\sigma_{m}^2 = \sum w_{i}\left( k-1\right) / \left[ \left( \sum w_{i}\right)^2 - \sum w_{i}^2\right]
+$$ {#eq-w}
+
+where *k* is the number of effect sizes and the weights, $w_{i} = \frac{1}{v_{i}}$, can be calculated using the inverse of the sampling variance ($v_{i}$) for each effect size, *i*. 
+
+Below, we'll make use of the `orchaRd` R package [@Nakagawa2021c; @Nakagawa2023] to calculate various $I^2$ metrics. In fact, we can simply change what is in the numerator of @eq-itot to calculate a multitude of different $I^2$ metrics that help us understand which factors are most important in explaining effect size variation. First, we'll calculate them by hand, and then with `orchaRd`:
+
+```{r}
+#| label: i2-by-hand
+
+# Step 1: the 'typical' sampling variance (@eq-w)
+w <- 1 / wu_met$vi            # weight of each effect size
+k <- nrow(wu_met)             # number of effect sizes
+
+sigma2_m <- sum(w) * (k - 1) / (sum(w)^2 - sum(w^2))
+
+# Step 2: the variance components from the model
+sigma2_study <- mod_ml$sigma2[1]   # among studies
+sigma2_es    <- mod_ml$sigma2[2]   # among effect sizes within studies (residual)
+
+# Step 3: the total variance (heterogeneity + typical sampling variance)
+total_var <- sigma2_study + sigma2_es + sigma2_m
+
+# Step 4: each I2 is a variance divided by the total, as a percentage
+I2_total <- 100 * (sigma2_study + sigma2_es) / total_var
+I2_study <- 100 * sigma2_study / total_var
+I2_es    <- 100 * sigma2_es / total_var
+
+c(I2_total = I2_total, I2_study = I2_study, I2_es = I2_es)
+
+# The same with orchaRd
+i2_ml(mod_ml)
+```
+
+Rough benchmarks: 25% low, 50% moderate, 75% high. In ecology and evolution, the *median* $I^2$ is ~92% [@Senior2016] – very high heterogeneity is the norm, not an anomaly.
+
+### Interpreting $I^2$ estimates
+
+::: {.panel-tabset}
+
+## Task 1
+
+>**Interpret the meaning of $I_{total}^2$ from the multilevel meta-analytic model.**
+
+## Answer 1
+
+>Overall, we have highly heterogeneous effect size data ($I_{total}^2$ = `r round(i2_ml(mod_ml)[1], 1)`%), because sampling variation contributes only `r round(100 - i2_ml(mod_ml)[1], 1)`% of the total variation in effects.
+
+## Task 2
+
+>**Interpret the meaning of $I_{study}^2$ from the multilevel meta-analytic model.**
+
+## Answer 2
+
+>From the multilevel meta-analytic model, we find that `r round(i2_ml(mod_ml)[2], 1)`% of the total variation in effect size estimates is the result of differences among studies.
+
+:::
+
+<br>
+
+
+#### Bootstrapping $I^2$ estimates
+
+There are also times when we may want to estimate, and present, the uncertainty in these heterogeneity estimates. We can do that by bootstrapping 1,000 times (this can take a few minutes):
+
+```{r}
+#| label: i2boot
+#| echo: true
+#| cache: true
+
+# Bootstrap the I2 estimates 1,000 times to get 95% confidence intervals
+set.seed(123)   # makes the bootstrap reproducible
+i2_boot <- i2_ml(mod_ml, boot = 1000)
+i2_boot
+
+```
+
+Here, we can now see that $I_{total}^2$ has a 95% confidence interval of about `r round(i2_boot[1, 2], 1)`% to `r round(i2_boot[1, 3], 1)`%.
+
+# $CVH_2$ and $M_2$
+
+$I^2$ is a *variance-partitioning* metric: it tells you what **fraction of total variance is genuine heterogeneity, not sampling error**. 
+
+That is useful, but it says nothing about whether the heterogeneity is large or small *relative to the mean effect*. Consider two meta-analyses that both have $I^2_{total} = 90\%$. If one has a mean ARR of 0.001 °C/°C, the absolute spread of effects is biologically negligible; if the other has a mean of 1 °C/°C the same 90% translates to enormous between-study variation. @Yang2025het propose two mean-standardised alternatives that capture this information:
+
+$$
+CVH_2 = \frac{\sum \sigma^2}{\hat{\mu}^2}
+$$ {#eq-cvh2}
+
+$$
+M_2 = \frac{\sum \sigma^2}{\hat{\mu}^2 + \sum \sigma^2}
+$$ {#eq-m2}
+
+where $\hat{\mu}$ is the meta-analytic mean and $\sum \sigma^2$ is the sum of all random-effect variance components (excluding sampling variance $\sigma^2_m$). $CVH_2$ (@eq-cvh2) is analogous to a squared coefficient of variation: values $> 1$ indicate that heterogeneity variance exceeds the mean effect squared. $M_2$ (@eq-m2) is bounded $[0, 1]$ and can be read as the proportion of total 'signal' (mean$^2$ + variance) that is heterogeneity. @Yang2025het recommend reporting both $CVH_2$ and $M_2$ alongside $I^2$ for a more complete picture. These metrics are implemented in `orchaRd`:
+
+```{r}
+#| label: cvhm
+#| echo: true
+
+cvh2_ml(MLMA)   # mean-standardised heterogeneity (variance scale)
+m2_ml(MLMA)     # heterogeneity as a fraction of the total 'signal'
+```
+
+#### Interpreting $CVH_2$ and $M_2$
+
+::: {.panel-tabset}
+
+## Task
+
+>**Given the values of $CVH_2$ and $M_2$ above, what do they tell you about ARR heterogeneity that $I^2_{total}$ does not?**
+
+## Answer
+
+>$I^2_{total}$ tells us that almost all of the variance in ARR estimates is real heterogeneity rather than sampling noise. But it does not tell us whether that heterogeneity is large or small on a biologically meaningful scale. $CVH_2$ answers that: a value much greater than 1 means the variance across studies is many times larger than the mean effect squared – i.e., the spread of true effects dwarfs the average effect. $M_2$ near 1 means variation dominates the signal; near 0 means the mean is large and stable relative to the scatter. Together these metrics clarify whether a high $I^2$ reflects *a lot of noise around a strong signal* or *a weak signal swamped by variation*.
+
+:::
+
+<br>
+
+# Prediction intervals
+
+Prediction intervals (PI) are probably the best and most intuitive way to report heterogeneity of meta-analytic results [@Borenstein2019; @Noble2022; @Nakagawa2021c; @Nakagawa2023]. Prediction intervals tell us how much we can expect a given effect size to vary across studies. More specifically, if we were to go out and conduct another study or experiment, they tell us the range of effect size estimates we are expected to observe 95% of the time from that new study [@Borenstein2019; @Noble2022; @Nakagawa2021c].
+
+Prediction intervals can be calculated in a similar way to confidence intervals, but instead of just using the standard error (as we do when constructing confidence intervals), we add in the extra random-effect variance estimates. For the model above, the **total** PI – spanning all sources of variance – is:
+
+$$
+PI_{total} \sim \mu \pm 1.96 \sqrt{SE^2 + \sigma^2_{study} +  \sigma^2_{species} + \sigma^2_{residual}}
+$$ {#eq-pi}
+
+However, @Yang2024pi highlight that the total PI conflates two distinct questions: (1) how variable are individual *effect size estimates* across all studies (which includes within-study residual variance, $\sigma^2_{residual}$), and (2) how variable are *study-level means* across different biological contexts (which excludes within-study residual variance). The latter – called the **study-level PI** – is often the more relevant question for biological generality, because it captures how much we expect the average result to shift if we replicated the study in a new species or population context:
+
+$$
+PI_{study} \sim \mu \pm 1.96 \sqrt{SE^2 + \sigma^2_{study} +  \sigma^2_{species}}
+$$ {#eq-pi-study}
+
+@Yang2024pi found that across 512 ecological and evolutionary meta-analyses, most of the wide total PI came from within-study (residual) variance, and that study-level generality was far more common than the total PI implied.
+
+Because `mod_ml` has no species random effect, its study-level PI only includes $\sigma^2_{study}$. We can compute both types easily:
+
+```{r}
+#| label: pis
+#| echo: true
+
+# Total PI: predict() uses all of the variance components
+pred <- predict(mod_ml)
+pred
+
+# Study-level PI: only the among-study variance (no within-study es_ID variance)
+# mod_ml$sigma2 is in the same order as the random list: [study_ID, es_ID]
+sigma2_study <- mod_ml$sigma2[1]
+
+pi_study_sd <- sqrt(mod_ml$se^2 + sigma2_study)   # SD used for the study-level PI
+
+pi_study_lb <- mod_ml$b[1] - 1.96 * pi_study_sd   # lower bound
+pi_study_ub <- mod_ml$b[1] + 1.96 * pi_study_sd   # upper bound
+
+c(lower = pi_study_lb, upper = pi_study_ub)
+```
+
+### Interpreting prediction intervals
+
+::: {.panel-tabset}
+
+## Task
+
+>**The meta-analytic mean Zr is `r round(pred$pred, 3)`. Compare the total PI to the study-level PI. What does each tell you, and why might one be more useful for assessing biological generality?**
+
+## Answer
+
+>The total 95% PI is wide – from `r round(pred$pi.lb, 3)` to `r round(pred$pi.ub, 3)` – suggesting a lot of inconsistency across individual effect size estimates. But some of that width comes from within-study residual variance (variation among effect sizes *within* a single study). The study-level PI, which retains only the among-study variance (`r round(pi_study_lb, 3)` to `r round(pi_study_ub, 3)`), is narrower and tells us how much the *average result* is expected to shift if we repeated the study in a new biological context. For biological generality, the study-level PI is the more relevant question: if most replications in new species or populations land near the mean, the phenomenon generalises well even if individual effect sizes are noisy.
+
+:::
+
+<br>
+
+```{r}
+#| label: fig-ci-pi
+#| echo: false
+#| fig-cap: "The estimated distribution of true effects (curve) implied by the multilevel model, with the 95% CI of the mean (thick bar) and the 95% prediction interval (thin bar), back-transformed to *r*. A mean close to zero can hide a wide range of positive and negative true effects."
+#| fig-height: 3
+# Distribution of true effects: mean = overall Zr, SD = sqrt(sum of variance components)
+total_sd <- sqrt(sum(mod_ml$sigma2))
+
+true_effects <- tibble(Zr = seq(-1.5, 1.5, by = 0.01)) %>%
+  mutate(density = dnorm(Zr, mean = mod_ml$b[1], sd = total_sd),
+         r = tanh(Zr))   # back-transform to r for plotting
+
+# Back-transform the mean, CI and PI to r
+intervals <- tibble(mean = tanh(pred$pred),
+                    ci_lb = tanh(pred$ci.lb), ci_ub = tanh(pred$ci.ub),
+                    pi_lb = tanh(pred$pi.lb), pi_ub = tanh(pred$pi.ub))
+
+ggplot() +
+  geom_area(data = true_effects, aes(x = r, y = density),
+            fill = pal["light"], alpha = 0.8) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  # thin bar = 95% prediction interval
+  geom_errorbar(data = intervals, aes(y = -0.15, xmin = pi_lb, xmax = pi_ub),
+                width = 0.12, orientation = "y", colour = pal["dark"]) +
+  # thick bar = 95% confidence interval
+  geom_errorbar(data = intervals, aes(y = -0.15, xmin = ci_lb, xmax = ci_ub),
+                width = 0, linewidth = 3, orientation = "y", colour = pal["red"]) +
+  geom_point(data = intervals, aes(x = mean, y = -0.15), size = 3, colour = pal["dark"]) +
+  geom_text(data = intervals, aes(x = pi_ub, y = -0.32), label = "95% PI (thin)",
+            hjust = 1, size = 3.3, colour = pal["dark"]) +
+  geom_text(data = intervals, aes(x = pi_lb, y = -0.32), label = "95% CI (thick) of the mean",
+            hjust = 0, size = 3.3, colour = pal["red"]) +
+  labs(x = "Correlation (r)", y = "Density of true effects")
+```
+
+# Cochran's Q
+
+So far we've talked about important heterogeneity statistics that describe, and quantify, the proportion of variability ($I^2$) or the expected range of plausible effect size values which incorporate all the variance estimates (PI). But, how do we know that the heterogeneity in the data is greater than what we would expect by chance? It seems obvious that, if $I_{total}^2$ is really high (e.g., > 85%), there's a lot of variability in effects within and across studies. While these statistics are probably sufficient, *Q*-tests can also be useful for making a more formal inferential statement about whether heterogeneity is significantly greater than chance. 
+
+We have already seen the *Q*-statistic in the output of the [fixed- and random-effects](fixed-random-multilevel.qmd) models. The *Q*-statistic is compared against a $\chi^2$-distribution to calculate a *p*-value. [Wolfgang's documentation](https://wviechtb.github.io/metafor/reference/rma.mv.html) (`?rma.mv`) describes what the *Q*-test means:
+
+> Cochran's 𝑄-test, which tests whether the variability in the observed effect sizes or outcomes is larger than one would expect based on sampling variability (and the given covariances among the sampling errors) alone. A significant test suggests that the true effects/outcomes are heterogeneous. 
+
+<br>
+
+We don't need to do anything special to get this test. In fact, it is done automatically by `metafor`:
+
+```{r}
+#| label: q
+#| echo: true
+
+# The Q-test is in the 'Test for Heterogeneity' line of the output
+summary(mod_ml)
+
+```
+
+### Describing the *Q*-test
+
+::: {.panel-tabset}
+
+## Task
+
+>**How would you describe in a paper the *Q*-test from the `metafor` model above?**
+
+## Answer
+
+>Of course, there are many ways that we could describe this test in words, but one way to describe it in your results section might be as follows:
+
+<br>
+
+>The overall mean *Zr* was `r round(mod_ml$b[1], 3)` and `r if (mod_ml$pval < 0.05) 'differed significantly' else 'did not differ significantly'` from zero (95% CI: `r round(mod_ml$ci.lb, 3)` to `r round(mod_ml$ci.ub, 3)`; *t*~`r mod_ml$ddf`~ = `r round(mod_ml$zval, 2)`, *p* `r fmt_p(mod_ml$pval)`). There was also significant residual heterogeneity (*Q* = `r round(mod_ml$QE, 1)`, df = `r mod_ml$k - 1`, *p* `r fmt_p(mod_ml$QEp)`), with effect sizes expected to range from `r round(pred$pi.lb, 3)` to `r round(pred$pi.ub, 3)` (95% prediction interval; $I_{total}^2$ = `r round(i2_ml(mod_ml)[1], 1)`%).
+
+:::
+
+<br>
+
+# $R^2$
+
+You will probably have noticed that $I^2$ looks awfully familiar. It looks a lot like the way we might calculate $R^2$, as described by @NakagawaSchielzeth2013. Well, you would be correct! Often we also want to quantify how much variation is explained by our moderators and random effects in our multilevel meta-regression model [@Nakagawa2017ab; @NakagawaSchielzeth2013]. This is done using $R^2$. We can calculate different $R^2$ values depending on whether we ignore or include random effects in the numerator. If only the variation explained by moderators is included in the numerator, then we call this $R_{marginal}^2$, which is defined as:
+
+$$
+R^2_{marginal} = \frac{\sigma^2_{fixed}}{\sigma^2_{fixed} + \sigma^2_{study} + \sigma^2_{phylogeny} + \sigma^2_{species} + \sigma^2_{residual}}
+$$ {#eq-r2}
+
+Note that this formula does not include $\sigma^2_{m}$, as the sampling error variance is assumed to be known in meta-analysis. We won't go into the details of how to calculate and interpret these here, because we'll cover this in the [meta-regression](../advanced/meta-regression.qmd) tutorial. Suffice it to say that this is a useful statistic for describing how much variation your moderators or model explain.
+
+
+::: 
+
+# Interpreting
+
+- The mean correlation is close to zero (*r* = `r sprintf("%.2f", tanh(pred$pred))`, 95% CI `r sprintf("%.2f", tanh(pred$ci.lb))` to `r sprintf("%.2f", tanh(pred$ci.ub))`).
+- But the 95% PI runs from *r* = `r sprintf("%.2f", tanh(pred$pi.lb))` to `r sprintf("%.2f", tanh(pred$pi.ub))`: in a new study, the true correlation could be moderately negative *or* moderately positive.
+- The biological conclusion is therefore **not** "metabolism is unrelated to movement" but "the relationship is highly **context-dependent**" – a strong motivation for [meta-regression](../advanced/meta-regression.qmd).
+
+::: {.callout-note}
+## A pluralistic view of heterogeneity
+@Yang2025het recommend reporting heterogeneity on several scales: absolute ($\sigma^2$, $\sigma$), relative to sampling error ($I^2$), relative to the mean ($CVH_2$ – the squared coefficient of variation of true effects) and as the share of the total signal ($M_2$). All are available in `orchaRd`:
+
+```{r}
+#| label: pluralistic
+cvh2_ml(mod_ml)   # heterogeneity relative to the mean
+m2_ml(mod_ml)     # heterogeneity as a share of the total signal
+```
+:::
+
+
+# Orchard plots
+
+A forest plot with `r mod_ml$k` effect sizes is unreadable. The **orchard plot** shows the overall mean (point = 'trunk'), its 95% CI (thick bar = 'branch'), the 95% PI (thin bar = 'twig') and every individual effect size scaled by its precision ('fruit') [@Nakagawa2021c].
+
+The `orchaRd` package provides the `orchard_plot()` function, which is a great tool for communicating meta-analytic results and heterogeneity at the same time [@Nakagawa2021c; @Nakagawa2023]. The plot shows:
+
+- the **meta-analytic mean** as a point estimate (the filled circle in @fig-orchard);
+- a **thick bar** spanning the 95% confidence interval (uncertainty around the mean);
+- a **thin bar** spanning the 95% **prediction interval** (the expected range of a future effect size – the key to visualising heterogeneity);
+- individual effect sizes are plotted as points scaled by their precision ($1/\sqrt{v_i}$), so precise estimates appear larger.
+
+
+```{r}
+#| label: fig-orchard
+#| fig-cap: "Orchard plot of the multilevel model Zr. k = number of effect sizes; the number in brackets is the number of studies."
+#| fig-height: 3.6
+orchard_plot(mod_ml,
+             mod = "1",              # "1" = overall mean (no moderator)
+             group = "study_ID",     # used to count the number of studies
+             xlab = "Fisher's Zr",
+             transfm = "none",       # keep the effect sizes on the Zr scale
+             cb = FALSE)             # use the workshop's red colours
+```
+
+Here is one for the `MLMA` model of the ARR data set (@fig-orchardARR). It shows that the mean ARR of female ectotherms is significantly greater than zero, but also a wide prediction interval, which immediately makes clear that there is substantial heterogeneity in ARR across species – the spread of effects is far greater than sampling error alone would produce.
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/pottier.png)
+
+
+```{r}
+#| label: fig-orchardARR
+#| echo: true
+#| fig-align: center
+#| fig-cap: "Orchard plot of acclimation response ratio (ARR) estimates across ectotherm species. The filled circle is the meta-analytic mean, the thick bar is the 95% confidence interval, and the thin bar is the 95% prediction interval. Individual effect sizes are scaled by precision."
+
+orchard_plot(MLMA,
+             mod = "1",               # overall mean (no moderator)
+             group = "species_ID",    # count the number of species
+             xlab = "Acclimation response ratio (ARR, °C / °C)",
+             cb = FALSE)              # use the workshop's red colours
+```
+
+
+# Your turn
+
+1. Refit the model to the **dispersal** effect sizes only (`disp_trait == "Dispersal"`, all physiological traits). Report $I^2_{total}$, $I^2_{study}$ and the 95% PI.
+2. Re-draw the orchard plot on the correlation scale (`transfm = "tanh"`).
+
+::: {.callout-tip collapse="true"}
+## Answers
+```{r}
+#| label: your-turn-answers
+#| fig-height: 3.4
+
+# 1. Download the data and keep only the dispersal effect sizes
+wu_disp <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
+  filter(disp_trait == "Dispersal")
+
+# Effect size IDs, then Zr and its sampling variance
+wu_disp$es_ID <- 1:nrow(wu_disp)
+
+wu_disp <- escalc(measure = "ZCOR",
+                  ri = corr_coeff,
+                  ni = sample_size,
+                  data = wu_disp)
+
+# Multilevel model
+mod_disp <- rma.mv(yi = yi,
+                   V = vi,
+                   random = list(~ 1 | study_ID,
+                                 ~ 1 | es_ID),
+                   test = "t",
+                   dfs = "contain",
+                   data = wu_disp)
+
+# I2 estimates
+i2_ml(mod_disp)
+
+# Mean, CI and PI, back-transformed to r with tanh
+predict(mod_disp, transf = tanh)
+
+# 2. Orchard plot on the correlation scale
+orchard_plot(mod_disp,
+             mod = "1",
+             group = "study_ID",
+             xlab = "Correlation (r)",
+             transfm = "tanh",
+             cb = FALSE)
+```
+:::
+
+# Writing it up
+
+Hopefully it's clear from this tutorial why explicitly estimating and reporting upon heterogeneity is so critically important in meta-analysis. Of course, some of these measures are only possible if we know the sampling variances, which is not the case if we don't use a weighted meta-analytic model.
+
+No single metric tells the whole story. @Yang2025het recommend a **pluralistic approach** to reporting heterogeneity:
+
+- **$I^2_{total}$** – tells you what fraction of variance is real signal (not sampling noise);
+- **$CVH_2$ and $M_2$** – tell you how large that heterogeneity is relative to the mean effect, answering the question "does the average matter if effects are so variable?";
+- **Prediction intervals** – give the most intuitive summary of heterogeneity as the expected range of a new result. Reporting both the *total* PI and the *study-level* PI [@Yang2024pi] helps distinguish noise within studies from genuine variation across biological contexts;
+- **An orchard plot** – visualises all of the above at once and should accompany any numerical heterogeneity summary [@Nakagawa2021c; @Nakagawa2023].
+
+Together these metrics give a far richer picture of heterogeneity than $I^2$ alone.
+
+The example write up below is based on the `mod_ml` multi-level meta-analytic model.
+
+::: {.writeup}
+Heterogeneity was high (*Q*~`r mod_ml$k - 1`~ = `r sprintf("%.1f", mod_ml$QE)`, *p* `r fmt_p(mod_ml$QEp)`; $I^2_{total}$ = `r sprintf("%.1f", i2_ml(mod_ml)[1])`%), with `r sprintf("%.1f", i2_ml(mod_ml)[2])`% of the variation attributable to differences among studies and `r sprintf("%.1f", i2_ml(mod_ml)[3])`% to differences among effect sizes within studies. Accordingly, the 95% prediction interval was wide (*r* = `r sprintf("%.2f", tanh(pred$pi.lb))` to `r sprintf("%.2f", tanh(pred$pi.ub))`), indicating that the relationship between metabolism and movement in a new study could be either negative or positive (Fig. X, orchard plot).
+:::
+
+
+# References
+
+<div id="refs"></div>
+
+<br>
+

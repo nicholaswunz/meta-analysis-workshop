@@ -1,0 +1,140 @@
+project:
+  type: website
+  output-dir: _site
+  execute-dir: project
+  resources:
+    - "data/*"
+    - "excel/*"
+  render:
+    - "*.qmd"
+    - "foundations/*.qmd"
+    - "models/*.qmd"
+    - "advanced/*.qmd"
+    - "activities/*.qmd"
+    - "resources/*.qmd"
+
+website:
+  title: "Meta-analysis in Comparative Physiology"
+  site-url: "https://nicholaswunz.github.io/meta-analysis-workshop/"
+  repo-url: "https://github.com/nicholaswunz/meta-analysis-workshop"
+  repo-actions: [source, issue]
+  description: "A hands-on workshop for graduate students: systematic reviews, effect sizes, multilevel meta-analysis and meta-regression in R with metafor (and brms)."
+  page-navigation: true
+  reader-mode: true
+  search: true
+  navbar:
+    left:
+      - text: "Home"
+        href: index.qmd
+      - text: "Setup"
+        href: setup.qmd
+      - text: "Foundations"
+        href: foundations/what-is-meta-analysis.qmd
+      - text: "Models"
+        href: models/fixed-random-multilevel.qmd
+      - text: "Advanced"
+        href: advanced/meta-regression.qmd
+      - text: "Activity"
+        href: activities/activity-1-effect-sizes.qmd
+      - text: "Resources"
+        menu:
+          - href: resources/brms-companion.qmd
+          - href: resources/data-dictionary.qmd
+          - href: resources/references.qmd
+    right:
+      - icon: github
+        href: "https://github.com/nicholaswunz/meta-analysis-workshop"
+        aria-label: "GitHub repository"
+  sidebar:
+    style: docked
+    collapse-level: 2
+    contents:
+      - index.qmd
+      - setup.qmd
+      - section: "Foundations"
+        contents:
+          - text: "What is meta-analysis?"
+            href: foundations/what-is-meta-analysis.qmd
+          - text: "Systematic review & search"
+            href: foundations/systematic-review.qmd
+          - text: "Effect sizes"
+            href: foundations/effect-sizes.qmd
+      - section: "Models & non-independence"
+        contents:
+          - text: "Fixed, random & multilevel models"
+            href: models/fixed-random-multilevel.qmd
+          - text: "Heterogeneity"
+            href: models/heterogeneity.qmd
+          - text: "Complex non-independence"
+            href: models/non-independence.qmd
+      - section: "Meta-regression, bias & advanced topics"
+        contents:
+          - text: "Multilevel meta-regression"
+            href: advanced/meta-regression.qmd
+          - text: "Publication bias"
+            href: advanced/publication-bias.qmd
+          - text: "Advanced: variability & location-scale"
+            href: advanced/variability-location-scale.qmd
+          - text: "Advanced: phylogenetic & spatial"
+            href: advanced/phylo-spatial.qmd
+      - section: "Activities"
+        contents:
+          - text: "Activity 1: Effect sizes"
+            href: activities/activity-1-effect-sizes.qmd
+          - text: "Activity 2: Multilevel models"
+            href: activities/activity-2-multilevel.qmd
+          - text: "Activity 3: Meta-regression & bias"
+            href: activities/activity-3-meta-regression.qmd
+      - section: "Resources"
+        contents:
+          - resources/brms-companion.qmd
+          - resources/data-dictionary.qmd
+          - resources/references.qmd
+  page-footer:
+    left: "Meta-analysis in Comparative Physiology · CC BY 4.0"
+    right: "Built with [Quarto](https://quarto.org), [metafor](https://www.metafor-project.org) & [orchaRd](https://daniel1noble.github.io/orchaRd/)"
+
+bibliography: resources/refs.bib
+csl: resources/the-journal-of-experimental-biology.csl
+link-citations: true
+
+format:
+  html:
+    theme:
+      - styles/theme.css
+      - styles/custom.scss
+      - lumen
+    toc: true
+    toc-depth: 3
+    toc-title: "On this page"
+    number-sections: false
+    code-copy: true
+    code-fold: show            # every R chunk gets its own show/hide toggle (starts open)
+    code-summary: "Show / hide code"
+    code-tools:                # '</> Code' menu at the top of each page
+      source: true             # view the page's .qmd source
+      toggle: true             # 'Show All Code' / 'Hide All Code' for the whole page
+    code-overflow: wrap
+    code-link: true
+    highlight-style: a11y
+    fig-align: center
+    fig-width: 7
+    fig-height: 4.5
+    fig-dpi: 150
+    callout-appearance: default
+    df-print: kable
+    html-math-method: mathjax
+
+fontsize: 97%;
+
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+  freeze: auto
+
+knitr:
+  opts_chunk:
+    comment: "#>"
+    collapse: false

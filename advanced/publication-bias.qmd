@@ -1,0 +1,745 @@
+---
+title: "Publication bias"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis, funnel plots, Egger's test, trim-and-fill
+               orchaRd,     # bubble plots and R2
+               patchwork)   # place ggplots side by side
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+# How publication bias arises
+
+Meta-analysts have worked hard to develop tools that can be used to try to understand different forms of publication practices and biases within the scientific literature. It is useful to distinguish a few related but distinct phenomena that are often lumped together under the umbrella of "publication bias" [@Nakagawa2021b; @Yang2024]:
+
+- **Small-study effects** -- the tendency for small (low-precision) studies to report systematically different effect sizes from large studies. This is what funnel plots and Egger-type tests are designed to detect.
+- **Selective reporting ('file-drawer' / *p*-hacking)** -- studies, or individual results within studies, are more likely to be written up or included if they are statistically significant or in the 'expected' direction [@Jennions2013] (@fig-sim-bias).
+- **Time-lag bias** -- early studies on a topic tend to report larger effect sizes than later studies, often because significant early findings are published faster [@Jennions2003].
+- **Decline effects** -- the related phenomenon where effect sizes shrink as a field matures, potentially as initial claims are revisited with larger samples and more rigorous designs.
+
+Visual and quantitative tools have been developed to try to identify, and 'correct' for, the effects of such biases on meta-analytic results [@Jennions2013; @Nakagawa2021b; @Rothstein2005; @Yang2024]. Having said that, aside from making the effort to incorporate 'grey literature' (unpublished theses, government reports, etc.) and to include work published in languages other than English, there is little one can truly do to counteract publication biases beyond a few simple tools (which all have limitations in themselves). We cannot know for certain what isn't published in many cases or how a sample of existing work on a topic might be biased. Nonetheless, exploring the possibility of publication bias and its possible effects on conclusions is a core component of meta-analysis [@ODea2021].
+
+In this tutorial, we'll overview some ways we can attempt to understand whether publication bias is present, using visual and analytical tools. The analytical approaches can be used as sensitivity analyses to explicitly test for small-study effects, time-lag bias and selective reporting, and to estimate what the effect size might look like if these biases were absent. This includes both the familiar multilevel Egger-type regression [@Nakagawa2021b] and more recent bias-robust estimation approaches that simultaneously handle non-independence among effect sizes [@Yang2024]. 
+
+Of course, often **we will never know whether such biases exist, and high heterogeneity can result in apparent publication bias when none exists**. The goal here is to play out a formal thought experiment: if publication bias were to exist, what form would it be expected to take, and how would our conclusions change if we had access to all studies, regardless of their significance or power?
+
+```{r}
+#| label: fig-sim-bias
+#| echo: false
+#| fig-cap: "Simulated funnel plots (true effect Zr = 0.1, no heterogeneity). Left: all 200 studies. Right: the same studies after 'publication filtering', where non-significant results are published with only 20% probability. Small, non-significant studies on the left of the funnel disappear, creating asymmetry and inflating the mean."
+#| fig-height: 4
+# Simulate 200 studies with sample sizes between 10 and 300 and a true Zr of 0.1
+set.seed(11)
+all_studies <- tibble(n = round(exp(runif(200, log(10), log(300))))) %>%
+  mutate(Zr_v = 1 / (n - 3),                              # sampling variance of Zr
+         Zr   = rnorm(200, mean = 0.1, sd = sqrt(Zr_v)),  # observed effect sizes
+         p    = 2 * pnorm(-abs(Zr / sqrt(Zr_v))),         # p-value of each study
+         # 'published' if significant and positive, otherwise only 20% of the time
+         published = (p < 0.05 & Zr > 0) | runif(200) < 0.2)
+
+# A function that draws a funnel plot for a data set
+funnel_gg <- function(dat, title) {
+
+  # Fixed-effect (inverse-variance weighted) mean
+  mu <- weighted.mean(dat$Zr, 1 / dat$Zr_v)
+
+  # Lines of the funnel: mean +/- 1.96 SE
+  se_grid <- tibble(se = seq(0, max(sqrt(dat$Zr_v)), length.out = 50)) %>%
+    mutate(lower = mu - 1.96 * se,
+           upper = mu + 1.96 * se)
+
+  ggplot(dat, aes(x = Zr, y = sqrt(Zr_v))) +
+    geom_line(data = se_grid, aes(x = lower, y = se), linetype = "dashed", colour = "grey50") +
+    geom_line(data = se_grid, aes(x = upper, y = se), linetype = "dashed", colour = "grey50") +
+    geom_vline(xintercept = mu, colour = pal["red"]) +                       # estimated mean
+    geom_vline(xintercept = 0.1, colour = pal["dark"], linetype = "dotted") + # true mean
+    geom_point(alpha = 0.6, colour = pal["red"]) +
+    scale_y_reverse() +                       # most precise studies at the top
+    labs(x = "Effect size (Zr)", y = "Standard error", title = title,
+         subtitle = paste0("weighted mean = ", round(mu, 2), " (truth = 0.10)"))
+}
+
+funnel_gg(all_studies, "All studies") +
+  funnel_gg(filter(all_studies, published), "Published studies only")
+```
+
+# Worked example: metabolic rate and fitness
+
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/arnold.png)
+
+We're going to have a look at a meta-analysis by @Arnold2021 that explores the relationship between resting metabolic rate and fitness in animals. Publication bias is fairly subtle in this particular meta-analysis, but it does appear to be present in some form, both visually and analytically. We'll start this tutorial by visually exploring the evidence for publication bias, and discuss what it might look like and why.
+
+```{r}
+#| label: data
+# Download the data
+arnold_data <- read.csv("https://raw.githubusercontent.com/pieterarnold/fitness-rmr-meta/main/MR_Fitness_Data_revised.csv")
+
+# Remove rows with a missing sample size (n.rep) or correlation (r)
+arnold_data <- arnold_data %>%
+  filter(!is.na(n.rep), !is.na(r))
+
+# Calculate the effect size (Zr) and its sampling variance (Zr_v)
+arnold_data <- escalc(measure = "ZCOR",
+                      ri = r,
+                      ni = n.rep,
+                      data = arnold_data,
+                      var.names = c("Zr", "Zr_v"))
+
+# Keep only endotherms (mammals and birds) for this demonstration.
+# One extreme outlier (Zr > 3) was also removed in the original paper.
+arnold_data_endo <- arnold_data %>%
+  filter(Class %in% c("Mammalia", "Aves"),
+         Zr <= 3)
+
+# Add an effect size ID and the sampling standard error
+arnold_data_endo$es_ID <- 1:nrow(arnold_data_endo)
+arnold_data_endo$sei   <- sqrt(arnold_data_endo$Zr_v)
+
+# Multilevel meta-analytic model (Ref = study)
+mod_arnold <- rma.mv(yi = Zr,
+                     V = Zr_v,
+                     random = list(~ 1 | Ref,
+                                   ~ 1 | es_ID),
+                     test = "t",
+                     dfs = "contain",
+                     data = arnold_data_endo)
+
+summary(mod_arnold)
+```
+
+::: {.panel-tabset}
+
+# 1. Visual and classic methods
+
+## Funnel plot
+
+Funnel plots are by far the most common visual tool for assessing the possibility of publication bias [@Nakagawa2021b]. Just like any exploratory analysis, **these are just visual tools**.
+
+Let's have a look at a funnel plot of the data. Funnel plots plot the effect size (x-axis) against some form of uncertainty around the effect size, such as sampling variance or precision (y-axis). While we acknowledge that many other types of plots exist to explore the possibility for publication bias [@Jennions2013; @Nakagawa2021b; @Rothstein2005], we will only cover this more common type.
+
+If no publication bias exists, then we would expect the plot to look fairly symmetrical and funnel-shaped (hence the name funnel plot!). The shape is a funnel because the sampling variance is expected to decrease (or the precision to increase) as the sample size, and thus power, increases. These 'high-powered' studies are at the top of the 'funnel', in the narrow-necked region, because we expect the effect sizes from these studies to fluctuate very little as a result of sampling. In contrast, as the power of studies decreases, and therefore their sampling variance increases, we expect the spread of effect sizes to increase, simply because small sample sizes result in more variable effects and effects that are larger in magnitude (by chance alone).
+
+```{r}
+#| label: fig-funnel
+#| echo: true
+#| fig-align: center
+#| fig-cap: "Funnel plot depicting the correlation between metabolism and fitness as a function of precision (1 / SE). The dotted lines are the theoretical 95% sampling variance intervals – the interval within which we expect effect size estimates to fall if only sampling variance drives differences in effects. Shaded regions represent the p-values of studies. The white region indicates studies where the p-value is between 0.1 and 1; dark grey, where the p-value is between 0.05 and 0.1; and the lighter grey regions, where the p-value is significant."
+
+# Contour-enhanced funnel plot of the effect sizes against precision (1 / SE)
+funnel(x = arnold_data_endo$Zr,                  # effect sizes
+       vi = arnold_data_endo$Zr_v,               # sampling variances
+       yaxis = "seinv",                          # y-axis = precision (1 / SE)
+       level = c(0.1, 0.05, 0.01),               # p-value contours
+       shade = c("white", "gray55", "gray75"),   # colours of the contours
+       col = "#e12744",                          # colour of the points
+       digits = 2,
+       las = 1,                                  # horizontal axis labels
+       xlab = "Correlation coefficient (r)",
+       atransf = tanh,                           # label the x-axis on the r scale
+       legend = TRUE)
+```
+
+We can see from @fig-funnel above the typical funnel shape. You will notice that most effects lie in the positive correlation space – in other words, there is a **strong positive correlation between RMR and fitness**. However, we also find some studies that show the opposite pattern. We expect this based on sampling theory alone, and indeed many of these effects fall close to the dotted sampling error intervals. Studies in the light grey regions are studies where the p-value was significant. 
+
+### What do we expect if publication bias were present?
+
+::: {.panel-tabset}
+
+## Task
+
+>**Think about what you would expect the funnel plot to look like and why.**
+
+<br>
+
+## Answer
+
+>Under a file-drawer situation (i.e., where researchers stash away poorer-quality studies showing opposite effects in their desk drawers), we might expect that studies with low power (i.e., low precision, large standard errors and small sample sizes) and non-significant correlations will go unpublished. This should be particularly true for studies that show the opposite of what we might predict from theory – specifically, non-significant negative correlations from studies with small sample sizes (low precision). This is one factor that can drive what we call funnel asymmetry, showing a bunch of missing effect sizes in the bottom left corner of the funnel.
+
+<br>
+
+## Interpreting our funnel plot
+
+>If we look at @fig-funnel, we do see some hint of this scenario. There is a noticeable blank space in the bottom-left corner, suggesting that small-to-moderate negative correlations based on very small sample sizes may be going unpublished. The contour-enhanced funnel plot also tells us that these are studies that failed to find a significant correlation. But, interestingly, we also see that if a negative correlation is large enough in magnitude, it can get published even with a small sample size, although for the most part these are significant at 0.05. We can only speculate as to why, or whether this is even a real signature of publication bias. However, it might suggest that when researchers estimate large correlations in the opposite direction to what one might expect, these arguably 'surprising' results are more likely to be published than weak correlations in the opposite direction.
+
+:::
+
+<br>
+
+## Funnel plot with meta-analytic residuals
+
+Visually identifying publication bias in funnel plots can be extremely challenging. That's because high heterogeneity, artefacts, data irregularities (mistakes, fraud) and simply chance can just as easily result in apparent funnel asymmetry [@Nakagawa2021b]. In fact, publication bias can even be present without any asymmetry at all! [see @Alfredo2018]. Given that heterogeneity is very high in ecological and evolutionary meta-analyses [see @Senior2016], we should try to correct for this (as best we can, anyway) to determine if patterns in the funnel plot remain. 
+
+We can achieve this to some extent by plotting a **funnel plot of meta-analytic residuals**, taken from a full multilevel meta-regression model that explicitly accounts for as much heterogeneity as possible. @Nakagawa2021b provide a [thorough supplement](https://itchyshin.github.io/publication_bias/#Appendix_extra:_Figure’s_R_code) that walks through different publication bias methods, how to apply them and also plotting different types of funnel plots.
+
+```{r}
+#| label: metareg
+
+# Meta-regression with fitness type as a moderator
+metareg <- rma.mv(yi = Zr,
+                  V = Zr_v,
+                  mods = ~ FitnessClassification,   # type of fitness component
+                  random = list(~ 1 | Ref,
+                                ~ 1 | es_ID),
+                  test = "t",
+                  dfs = "contain",
+                  data = arnold_data_endo)
+
+summary(metareg)
+```
+
+We can have a look at how much variation this model explains by calculating marginal ($R_{marginal}^2$) and conditional ($R_{conditional}^2$) $R^2$. 
+
+```{r}
+#| label: metareg-r2
+
+# How much variation does the model explain? (as a %)
+r2_ml(metareg) * 100
+```
+
+### What is the difference between marginal and conditional $R^2$?
+
+::: {.panel-tabset}
+
+## Task
+
+>**Interpret the meaning of both values from our $R^2$ calculations.**
+
+<br>
+
+## Answer
+
+>From the output above, we can see that the moderator (fixed effect) explains `r round(r2_ml(metareg)[1] * 100, 2)`% of the variation in *Zr* estimates ($R_{marginal}^2$), whereas the fixed and random effects together explain `r round(r2_ml(metareg)[2] * 100, 2)`% of the variation ($R_{conditional}^2$). Interestingly, we still have a significant amount of residual heterogeneity that we cannot explain ($QE$ = `r round(metareg$QE, 1)`, *p* `r fmt_p(metareg$QEp)`).
+
+:::
+
+<br>
+
+### Funnel plot with residuals
+
+Now that we have a full model estimated, we can extract the residuals from this model and re-make our funnel plot using the residuals (@fig-funnelresid). 
+
+```{r}
+#| label: fig-funnelresid
+#| echo: true
+#| fig-align: center
+#| fig-cap: "Funnel plot of meta-analytic residuals against precision (1 / SE). The dotted lines are the theoretical 95% sampling variance intervals – the interval within which we expect effect size estimates to fall if only sampling variance drives differences in effects. Shaded regions represent the p-values of studies. The white region indicates studies where the p-value is between 0.1 and 1; dark grey, where the p-value is between 0.05 and 0.1; and the lighter grey regions, where the p-value is significant."
+
+# Marginal residuals: observed effect size minus the prediction from the moderators
+resid_marg <- residuals(metareg)
+
+# BLUPs: the estimated random effect of each study (Ref) and each effect size (es_ID)
+blups <- ranef(metareg)
+
+# Find the BLUPs that belong to each row of the data
+study_blup <- blups$Ref$intrcpt[match(arnold_data_endo$Ref, rownames(blups$Ref))]
+es_blup    <- blups$es_ID$intrcpt[match(arnold_data_endo$es_ID, rownames(blups$es_ID))]
+
+# Conditional residuals: also remove the study and effect size random effects
+resid_cond <- resid_marg - study_blup - es_blup
+
+# Two funnel plots side by side. The y-axis uses the sampling variance, so the
+# funnel shows the spread expected from sampling error alone; any scatter beyond
+# it is residual heterogeneity (or bias).
+par(mfrow = c(1, 2))
+
+funnel(x = resid_marg,
+       vi = arnold_data_endo$Zr_v,
+       yaxis = "seinv",
+       level = c(0.1, 0.05, 0.01),
+       shade = c("white", "gray55", "gray75"),
+       col = "#e12744",
+       digits = 2,
+       las = 1,
+       xlab = "Meta-analytic residuals (marginal)",
+       legend = FALSE)
+
+funnel(x = resid_cond,
+       vi = arnold_data_endo$Zr_v,
+       yaxis = "seinv",
+       level = c(0.1, 0.05, 0.01),
+       shade = c("white", "gray55", "gray75"),
+       col = "#e12744",
+       digits = 2,
+       las = 1,
+       xlab = "Meta-analytic residuals (conditional)",
+       legend = FALSE)
+
+par(mfrow = c(1, 1))   # back to one plot per figure
+```
+
+
+### How do our conclusions about the possibility of publication bias change by plotting residuals?
+
+::: {.panel-tabset}
+
+## Task
+
+>**After looking at the new funnel plots (@fig-funnelresid), which account for varying amounts of heterogeneity in the model, would you say our conclusions about whether publication bias is present have changed? If not, why not?**
+
+<br>
+
+## Answer
+
+>Maybe. Even after accounting for factors that explain (or estimate) heterogeneity in the data, we still see areas of the funnel plot that appear to be missing effect size estimates; notably, for the marginal residuals, we still see the missing effects on the left side. However, when looking at the conditional residuals (which account for both the fixed and random effects), there is still a gap when precision is low, but we also see some effect size estimates being published with very low precision, which is not really what we might expect from publication bias.
+
+:::
+
+<br> 
+
+
+## Egger's regression and trim-and-fill
+
+**Egger's regression** [@Egger1997] regresses effect sizes on their standard errors; a non-zero slope indicates funnel asymmetry.
+
+**Trim-and-fill** [@Duval2000] imputes the 'missing' studies needed to make the funnel symmetric and re-estimates the mean.
+
+```{r}
+#| label: classic
+# Both methods require a standard (two-level) random-effects model
+mod_re_arnold <- rma(yi = Zr,
+                     vi = Zr_v,
+                     data = arnold_data_endo)
+
+# Egger's regression test (uses the standard error as the predictor)
+regtest(mod_re_arnold, predictor = "sei")
+
+# Trim-and-fill
+tf <- trimfill(mod_re_arnold)
+tf
+```
+
+```{r}
+#| label: fig-trimfill
+#| fig-cap: "Funnel plot with trim-and-fill: open circles are the imputed 'missing' effect sizes."
+#| fig-height: 4.5
+#| fig-width: 6
+funnel(tf,
+       xlab = "Fisher's Zr",
+       col = "#e12744",               # observed effect sizes
+       legend = list(show = "cis"))
+```
+
+::: {.callout-warning}
+## Limitations of the classic methods
+Egger's test and trim-and-fill assume **independent** effect sizes and **no heterogeneity** beyond a simple random effect. Both assumptions are badly violated in most ecological and physiological meta-analyses, where asymmetry can also be produced by genuine heterogeneity (e.g., small studies done on different species). Use them as visual or sensitivity tools only, and prefer the multilevel meta-regression approach below [@Nakagawa2021b].
+:::
+
+---
+
+# 2. Multilevel meta-regression for small-study and time-lag effects
+
+While funnel plots are a useful visual tool for identifying publication bias, **how do we know for sure if publication bias is actually going to be a problem**? Do we have less subjective tools that can both quantitatively test and correct for the possibility of publication bias? The short answer is: we do! The caveat here is that these are still not definitive proof of publication bias, and we must keep that in mind. Any results from publication bias tests should be interpreted with caution and viewed as sensitivity analyses [@Noble2017; @Koricheva2013] because we will never truly know how many missing effect sizes actually exist.
+
+In this section, we'll walk through three complementary analytical tools that together provide a more defensible picture of whether publication bias is shaping our conclusions:
+
+1. **Multilevel Egger-type regression** – including the sampling error as a moderator in a multilevel meta-regression to test for small-study effects and obtain an 'adjusted' meta-analytic mean [@Nakagawa2021b; @Stanley2014]. It addresses the critical issues with the simpler Egger's test and trim-and-fill discussed previously.
+2. **Time-lag bias tests** – including publication year as a moderator to test whether effect sizes are shrinking over time, one form of the 'decline effect' [@Nakagawa2021b].
+3. **Bias-robust weighting with cluster-robust variance estimation** – a recent two-step framework from @Yang2024 that simultaneously tackles selective reporting and non-independence, which @Yang2024 show can jointly inflate effect sizes by over 100% and deflate standard errors by over 120% when ignored.
+
+No single test is definitive, and each rests on assumptions that can fail in ecological data. The point is to triangulate: if several complementary approaches tell the same story, we can have more confidence in our conclusions.
+
+@Nakagawa2021b [building on work by @Stanley2012; @Stanley2014] outline a method for testing and accounting for publication bias using multilevel meta-regression approaches. Here, we include the sampling standard error (SE) (or variance, V) directly as a moderator in our meta-regression model. We can explicitly test whether the sampling SE (or V) significantly explains variation in our effect sizes. To be more explicit, we can adjust our multilevel meta-regression model as follows:
+
+$$
+\begin{aligned}
+y_{i} &= \mu + \beta_{se}se_{i} + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{j} &\sim N(0, \tau^2) \\
+spp_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+Of course, we could also include a suite of other moderators in our analysis to account for more heterogeneity, as shown in the [meta-regression tutorial](meta-regression.qmd):
+
+$$
+y_{i} = \mu + \sum_{m = 1}^{N_{m}}\beta_{m}x_{m,i} + \beta_{se}se_{i} + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i}
+$$
+
+Here, $\beta_{m}$ is the slope (or contrast) for the $m^{th}$ moderator (where m = 1, ..., $N_{moderator}$ or $N_{m}$). Of course, $\beta_{se}se_{i}$ could be included in this sum, but we separate it out to make clear that SE (or V) is included as a moderator in addition to the other moderators. @Stanley2012 and @Stanley2014 have shown that the intercept ($\mu$) of a model that estimates $\beta_{se}$ provides an estimate of the meta-analytic mean adjusted for the possibility of publication bias [@Nakagawa2021b; see the correction to the original paper, @Nakagawa2022cor]. However, they also showed that when $\mu$ is significant, SE is best replaced with the sampling variance (i.e., $SE^2$), because the intercept from the model with SE is downwardly biased.
+
+As such, @Nakagawa2021b recommend a two-step approach. **First, fit a model with SE**. If the intercept of that model is significant, then refit the model using V (or $SE^2$), as this will give a better estimate of the adjusted mean effect size.
+
+### Why does including sampling variance in the model adjust the overall meta-analytic mean?
+
+::: {.panel-tabset}
+
+## Task
+
+>**Think about how the meaning of the intercept, $\mu$, changes when a continuous moderator, such as $se$, is included in the model. When estimating $\beta_{se}$ explicitly, how do we now interpret the intercept (meta-analytic mean)?**
+
+<br>
+
+## Answer
+
+>The intercept ($\mu$) is an adjusted meta-analytic mean because, when we include a continuous moderator, the intercept takes on a different meaning. For example, if we fit the multilevel meta-regression model using SE, then the intercept estimated in that model is the overall meta-analytic mean when SE is zero. Or, in other words, when there is **no** sampling variability or uncertainty around the estimate. We can see that this is true by setting SE = 0 in the equation:
+
+$$
+y_{i} = \mu + \beta_{se} \times 0 = \mu
+$$
+
+:::
+
+<br>
+
+
+## 1) Fitting a multilevel meta-regression model to test and correct for publication bias
+
+Let's now apply the methods proposed above to @Arnold2021's data. To keep things simple, we will remove the other moderators and only fit SE or V. This simplifies the interpretation of the intercept, but we could always include the fitness type moderator in these models as well.
+
+```{r}
+#| label: metareg-se
+
+# Sampling standard error (sei = sqrt(Zr_v)) as the moderator
+metareg_se <- rma.mv(yi = Zr,
+                     V = Zr_v,
+                     mods = ~ sei,
+                     random = list(~ 1 | Ref,
+                                   ~ 1 | es_ID),
+                     test = "t",
+                     dfs = "contain",
+                     data = arnold_data_endo)
+
+summary(metareg_se)
+```
+
+We'll also fit the model with the sampling variance for good measure, but if the `intrcpt` of the SE model is not significant, **we interpret the first model**.
+
+```{r}
+#| label: V
+#| echo: true
+
+# Sampling variance (Zr_v) as the moderator
+metareg_v <- rma.mv(yi = Zr,
+                    V = Zr_v,
+                    mods = ~ Zr_v,
+                    random = list(~ 1 | Ref,
+                                  ~ 1 | es_ID),
+                    test = "t",
+                    dfs = "contain",
+                    data = arnold_data_endo)
+
+summary(metareg_v)
+```
+
+### Interpreting the results
+
+::: {.panel-tabset}
+
+## Task
+
+>**Is there evidence for publication bias? If so, what is the adjusted meta-analytic mean estimate?**
+
+<br>
+
+## Answer
+
+>`r ifelse(metareg_se$pval[2] < 0.05, 'Yes, there is evidence for publication bias, because the slope for the sampling standard error (\x60sei\x60) is significant', 'There is no clear evidence for publication bias, because the slope for the sampling standard error (\x60sei\x60) is not significant')` (*p* `r fmt_p(metareg_se$pval[2])`). `r ifelse(metareg_se$pval[1] < 0.05, 'Given that the \x60intrcpt\x60 is significant, we should interpret the model using V instead of SE.', 'Given that the \x60intrcpt\x60 is not significant, we can interpret the model using SE instead of V.')` From the SE model, the adjusted *Zr* when there is *no* uncertainty is `r round(metareg_se$b[1], 3)` (95% CI = `r round(metareg_se$ci.lb[1], 3)` to `r round(metareg_se$ci.ub[1], 3)`). In other words, if there were no uncertainty around estimates (i.e., a set of very high-powered studies), then we would expect the correlation to be, on average, `r round(tanh(metareg_se$b[1]), 3)`.
+
+:::
+
+<br>
+
+
+::: {.callout-caution}
+### A note on effect size choice
+
+The above approach works cleanly for Fisher's $Z_r$ because the sampling variance of $Z_r$ depends only on sample size, not on the effect size itself. For standardised mean differences (SMD / Hedges' $g$) and log response ratios (lnRR), the sampling variance is mathematically coupled to the point estimate, so using $\sqrt{v}$ as a moderator can induce a spurious slope even when there is no publication bias at all [@Nakagawa2021b]. @Nakagawa2021b therefore recommend using a transformation of the **effective sample size** as the moderator instead of $\sqrt{v}$ when working with SMD or lnRR. For SMD and lnRR a good default is:
+
+$$
+\text{moderator} = \sqrt{\frac{\tilde{n}_{1} + \tilde{n}_{2}}{\tilde{n}_{1}\tilde{n}_{2}}},
+$$
+
+where $\tilde{n}_{1}$ and $\tilde{n}_{2}$ are the per-group sample sizes. This is proportional to the 'design-based' sampling standard error but does not depend on the observed effect size. In `metafor`, this simply means replacing `sei` in the `mods` argument with the pre-calculated moderator column.
+:::
+
+## 2) Testing for time-lag bias
+
+Another useful diagnostic asks whether effect sizes are *shrinking over time* – a pattern often called a **time-lag bias** or **decline effect** [@Nakagawa2021b; @Jennions2013]. The intuition is that for early studies addressing a research question, large and significant results are disproportionately likely to be published first (because they are 'exciting', or simply easier to write up and get accepted). As the field matures, smaller and null results catch up, and the apparent effect size decays. 
+
+We can test this directly by including publication year as a moderator in the multilevel model. To make the intercept interpretable as the mean effect at the *average* publication year, we mean-centre year first. However, publication year could be centred on any year of interest.
+
+```{r}
+#| label: timelag
+#| echo: true
+
+# Mean-centre publication year so the intercept is the effect at the mean year
+arnold_data_endo$year_c <- arnold_data_endo$Year - mean(arnold_data_endo$Year)
+
+# Publication year (centred) as the moderator
+metareg_year <- rma.mv(yi = Zr,
+                       V = Zr_v,
+                       mods = ~ year_c,
+                       random = list(~ 1 | Ref,
+                                     ~ 1 | es_ID),
+                       test = "t",
+                       dfs = "contain",
+                       data = arnold_data_endo)
+
+summary(metareg_year)
+```
+
+We can also fit a combined model that tests for small-study effects and time-lag bias *simultaneously*, which is the model **advocated by @Nakagawa2021b**:
+
+```{r}
+#| label: eggeryear
+#| echo: true
+
+# Standard error and publication year together
+metareg_full <- rma.mv(yi = Zr,
+                       V = Zr_v,
+                       mods = ~ sei + year_c,
+                       random = list(~ 1 | Ref,
+                                     ~ 1 | es_ID),
+                       test = "t",
+                       dfs = "contain",
+                       data = arnold_data_endo)
+
+summary(metareg_full)
+```
+
+### Interpreting the time-lag test
+
+::: {.panel-tabset}
+
+## Task
+
+>**Look at the slope for `year_c` in the combined model. Is there evidence that effect sizes in the Arnold dataset have changed systematically over time? How would you report this alongside the small-study effect test?**
+
+<br>
+
+## Answer
+
+>Here, the slope for `year_c` is `r round(metareg_full$b[3], 4)` per year (*p* `r fmt_p(metareg_full$pval[3])`). A significant *negative* slope on `year_c` would indicate a decline effect: more recent studies report smaller $Z_r$ values than older ones. A *positive* slope would suggest the opposite – that earlier studies underestimated the effect. A slope that is indistinguishable from zero means there is no detectable time-lag bias, and the intercept (at the mean year) is a reasonable summary of the long-term average effect. Because both $\sqrt{v}$ and `year_c` are included simultaneously, each slope tests for its own bias *after adjusting* for the other, which is useful because time-lag and small-study effects can be partially confounded (early studies were often smaller).
+
+:::
+
+```{r}
+#| label: fig-bias-bubbles
+#| fig-cap: "Left: small-study effect – effect size against sampling standard error. Right: time-lag effect – effect size against publication year. Lines are multilevel meta-regression fits; bubble size is precision."
+#| fig-height: 4
+#| fig-width: 10
+# Small-study effect
+p_se <- bubble_plot(metareg_se,
+                    mod = "sei",
+                    group = "Ref",
+                    xlab = "Standard error",
+                    ylab = "Zr",
+                    legend.pos = "none",
+                    est.col = "#e12744")   # colour of the regression line
+
+# Time-lag effect
+p_yr <- bubble_plot(metareg_full,
+                    mod = "year_c",
+                    group = "Ref",
+                    xlab = "Publication year (centred)",
+                    ylab = "Zr",
+                    legend.pos = "none",
+                    est.col = "#e12744")
+
+p_se + p_yr
+```
+
+## Interpreting
+
+```{r}
+#| label: bias-table
+# Compare the unadjusted and bias-adjusted means
+bias_tbl <- data.frame(
+  model = c("Multilevel mean", "Bias-adjusted (SE + year)"),
+  Zr    = c(mod_arnold$b[1],  metareg_full$b[1]),
+  ci_lb = c(mod_arnold$ci.lb, metareg_full$ci.lb[1]),
+  ci_ub = c(mod_arnold$ci.ub, metareg_full$ci.ub[1])
+)
+
+# Back-transform to correlations (r)
+bias_tbl$r       <- tanh(bias_tbl$Zr)
+bias_tbl$r_ci_lb <- tanh(bias_tbl$ci_lb)
+bias_tbl$r_ci_ub <- tanh(bias_tbl$ci_ub)
+
+bias_tbl
+```
+
+- **Small-study effect**: slope for `sei` = `r sprintf("%.2f", metareg_full$b[2])` (*p* `r fmt_p(metareg_full$pval[2])`).
+- **Time-lag effect**: slope for `year_c` = `r sprintf("%.4f", metareg_full$b[3])` per year (*p* `r fmt_p(metareg_full$pval[3])`).
+- The **bias-adjusted** mean (intercept) is `r sprintf("%.3f", metareg_full$b[1])` vs. `r sprintf("%.3f", mod_arnold$b[1])` without adjustment. When the SE slope is clearly non-zero, the intercept of a model with $SE^2$ (rather than $SE$) as the moderator often gives a less downwardly biased adjusted estimate (the 'PET-PEESE' logic) [@Stanley2014].
+
+<br>
+
+### 3) Bias-robust estimation with dependent effect sizes
+
+The approaches above all rely on the usual multilevel random-effects (MLMA) weights, which for effect size $i$ are proportional to $1/(v_i + \tau^2)$, where $v_i$ is the sampling variance and $\tau^2$ is the estimated between-study heterogeneity. @Yang2024 point out two problems with this when selective reporting is present alongside non-independent effect sizes:
+
+1. **Adding $\tau^2$ to the weights erodes the protection against small-study effects.** In the classical fixed-effect model the weights are $1/v_i$, so imprecise (small-$n$) studies are penalised heavily and have little influence on the pooled mean. In the random-effects model, as $\tau^2$ grows large relative to $v_i$, the weights become increasingly similar across studies – small studies start to receive almost as much weight as large ones. If the literature is *also* selectively reporting large effects from small studies (the classic file-drawer pattern), the MLMA model gives those biased effects far more influence than a fixed-effect model would. @Yang2024 show this is why conventional MLMA estimates tend to inherit selective-reporting bias.
+2. **Standard parametric SEs assume a correctly specified dependence structure.** Clustered effect sizes (multiple effects per study, phylogenetic clustering, shared controls) inflate Type I error rates even when random effects are included, because the working covariance structure is rarely specified perfectly.
+
+@Yang2024 re-analysed 448 ecological and evolutionary meta-analyses and showed that the *joint* impact of these two problems can be substantial: on average, effect sizes are overestimated and standard errors are underestimated when both are ignored. They propose a simple **two-step procedure**:
+
+- **Step 1 – bias-robust point estimation.** Fit a *fixed-effect* multivariate model (no study- or observation-level random effects) using a within-study variance--covariance matrix built with `metafor::vcalc()`. Because this model uses $1/v_i$-type weights rather than $1/(v_i + \tau^2)$, imprecise studies are penalised as they would be in a classical FE meta-analysis, making the pooled mean far less sensitive to selective reporting. This is sometimes called the **FE + VCV** or **unrestricted weighted least squares (UWLS)** estimator.
+- **Step 2 – cluster-robust variance estimation (CRVE).** Wrap the Step 1 model in `metafor::robust()` with `clubSandwich = TRUE` (or equivalently call `clubSandwich::coef_test()`) and set `cluster =` to the study ID. This produces CR2 small-sample-corrected sandwich standard errors and Satterthwaite-style degrees of freedom, which remain valid even though the Step 1 model deliberately ignores between-study heterogeneity. Note that CR2 is only applicable when the underlying model has no random effects, which is exactly why Step 1 is fixed-effect.
+
+Let's apply this to the Arnold endotherm data. We'll compare the naive multilevel estimate, the $\sqrt{v}$-adjusted Egger estimate, and the bias-robust FE + VCV estimate with CRVE.
+
+```{r}
+#| label: biasrobust
+#| echo: true
+#| message: false
+#| warning: false
+
+# (a) Naive multilevel meta-analytic mean (weights include tau^2)
+#     This is the same model as mod_arnold above
+mod_naive <- rma.mv(yi = Zr,
+                    V = Zr_v,
+                    random = list(~ 1 | Ref,
+                                  ~ 1 | es_ID),
+                    test = "t",
+                    dfs = "contain",
+                    data = arnold_data_endo)
+
+# (b) Step 1 of Yang et al. (2024): bias-robust FE + VCV model.
+#     Build a within-study (co)variance matrix assuming a sampling correlation
+#     of 0.5 between effect sizes from the same study...
+VCV <- vcalc(vi = Zr_v,
+             cluster = Ref,     # effect sizes from the same study are correlated
+             obs = es_ID,
+             rho = 0.5,         # assumed correlation
+             data = arnold_data_endo)
+
+#     ...then fit a fixed-effect model (note: no random argument)
+mod_MLFE <- rma.mv(yi = Zr,
+                   V = VCV,
+                   test = "t",
+                   dfs = "contain",
+                   data = arnold_data_endo)
+
+summary(mod_MLFE)
+
+# (c) Step 2: cluster-robust (CR2) standard errors, with study (Ref) as the cluster
+mod_MLFE_RVE <- robust(mod_MLFE,
+                       cluster = arnold_data_endo$Ref,
+                       adjust = TRUE,
+                       clubSandwich = TRUE)
+
+mod_MLFE_RVE
+```
+
+We can now assemble a side-by-side comparison of the three approaches:
+
+```{r}
+#| label: biasrobust-compare
+#| echo: true
+
+# One row per method: the estimate and its 95% CI
+comparison <- data.frame(
+  Method   = c("Naive MLMA (Ref + es_ID random effects)",
+               "sqrt(v)-adjusted (Nakagawa et al. 2022)",
+               "FE + VCV + CR2 (Yang et al. 2024)"),
+  Estimate = c(mod_naive$b[1],     metareg_se$b[1],     mod_MLFE_RVE$b[1]),
+  CI_lower = c(mod_naive$ci.lb[1], metareg_se$ci.lb[1], mod_MLFE_RVE$ci.lb[1]),
+  CI_upper = c(mod_naive$ci.ub[1], metareg_se$ci.ub[1], mod_MLFE_RVE$ci.ub[1])
+)
+
+comparison
+```
+
+### Which estimate would you report?
+
+::: {.panel-tabset}
+
+## Task
+
+>**Compare the three estimates in the table above. Do they tell the same story, or do they disagree? Which would you report as your headline estimate, and how would you use the others?**
+
+<br>
+
+## Answer
+
+>There is no single 'right' answer here, and that is the point. The naive REML estimate is what most readers will expect to see, but it is the most vulnerable to both selective reporting and under-estimated standard errors. The $\sqrt{v}$-adjusted estimate asks 'what would the effect be in a hypothetical study with no sampling error?' and is the standard publication-bias sensitivity check in ecology. The bias-robust + CRVE estimate asks 'what does the pooled mean look like if we stop small, imprecise studies from gaining extra weight, and if we do not trust the parametric standard errors?'. A defensible strategy is to report the naive estimate as the primary result and present the other two as sensitivity analyses – if all three agree qualitatively, the conclusion is robust. If they disagree strongly, the disagreement itself is the result, and you should be cautious about any strong claims from the naive model.
+
+:::
+
+<br>
+
+
+::: {.callout-note}
+## Going further
+- **Robust bias-corrected estimates** [@Yang2024]: fit an equal-effects multilevel model with a within-study V matrix (`vcalc()`), then apply cluster-robust variance estimation (`robust(..., clubSandwich = TRUE)`).
+- **Sensitivity analyses**: leave-one-study-out analyses (`orchaRd::leave_one_out()`) and influence diagnostics (`cooks.distance()` on `rma.mv` models).
+:::
+
+:::
+
+## Reminder
+
+::: {.callout-important}
+## Which measure of uncertainty?
+For **Zr**, $SE = 1/\sqrt{n-3}$ depends only on sample size, so we can use `sei` directly. For **lnRR** and **SMD**, the sampling variance contains the effect size itself, which creates an artefactual correlation between $y_i$ and $SE_i$. Use the 'effective sample size' instead: $\sqrt{1/\tilde{n}}$, with $\tilde{n} = N_{1}N_{2} / (N_{1} + N_{2})$ [@Nakagawa2021b].
+:::
+
+# Your turn
+
+1. Refit `metareg_full` with `Zr_v` (the sampling variance) instead of `sei`. How does the intercept change?
+2. Add `Class` (birds vs mammals) to `metareg_full`. Does controlling for this biological moderator change the bias tests?
+
+::: {.callout-tip collapse="true"}
+## Answers
+```{r}
+#| label: your-turn-answers
+
+# 1. Sampling variance instead of standard error
+metareg_full_v <- rma.mv(yi = Zr,
+                         V = Zr_v,
+                         mods = ~ Zr_v + year_c,
+                         random = list(~ 1 | Ref,
+                                       ~ 1 | es_ID),
+                         test = "t",
+                         dfs = "contain",
+                         data = arnold_data_endo)
+
+# Compare the two intercepts (adjusted means)
+metareg_full$b[1]     # with SE
+metareg_full_v$b[1]   # with V
+
+# 2. Add Class (birds vs mammals) as a biological moderator
+metareg_full_class <- rma.mv(yi = Zr,
+                             V = Zr_v,
+                             mods = ~ sei + year_c + Class,
+                             random = list(~ 1 | Ref,
+                                           ~ 1 | es_ID),
+                             test = "t",
+                             dfs = "contain",
+                             data = arnold_data_endo)
+
+summary(metareg_full_class)
+```
+1. The adjusted mean (intercept) is `r round(metareg_full$b[1], 3)` with SE and `r round(metareg_full_v$b[1], 3)` with V. The intercept from the SE model tends to be downwardly biased when there is a genuine non-zero effect, which is why V is preferred when the intercept of the SE model is significant.
+2. It is good practice to include the important biological moderators in the publication-bias model, because genuine heterogeneity correlated with sample size can masquerade as a small-study effect.
+:::
+
+
+# Writing it up
+
+While funnel plots can be useful, they do have clear limitations. @Nakagawa2021c overview the many assumptions being made, particularly when using residuals, and how non-independence of sampling errors can cause problems. In particular, residual funnel plots inherit the dependence structure of the fitted model, and @Yang2024 recently showed that ignoring such dependence together with selective reporting can *overestimate* effect sizes on average while simultaneously *underestimating* standard errors. Visual assessment is therefore best viewed as a first pass, followed by the more sophisticated and less subjective approaches covered above: the multilevel Egger-type regression of @Nakagawa2021b and the bias-robust weighting + cluster-robust variance framework of @Yang2024.
+
+Rather than relying on a single publication-bias test, the current best-practice workflow for ecological meta-analyses is to triangulate across several complementary tools:
+
+1. Start with a **contour-enhanced funnel plot** of both raw effects and meta-analytic residuals to build intuition about what might be missing and where.
+2. Fit a **multilevel Egger-type model** including $\sqrt{v}$ (or the effective-sample-size moderator for SMD/lnRR) to test for small-study effects and obtain an adjusted mean [@Nakagawa2021b].
+3. Add **publication year** as a moderator to test for time-lag bias and decline effects [@Nakagawa2021b].
+4. Finally, refit the model using **bias-robust weights and cluster-robust variance estimation** to check whether your pooled mean is being driven by selective reporting or by assumed-away non-independence [@Yang2024].
+
+If these analyses tell a consistent story, you can report your meta-analytic mean with reasonable confidence. If they disagree, the disagreement is itself an important result and should be reported transparently. None of these tools provides definitive proof that publication bias is (or is not) present – they are sensitivity analyses designed to make your conclusions more defensible in the face of an inherently incomplete literature [@Noble2017; @Koricheva2013].
+
+Here is an example write up of the `metareg_full` multi-level model with `sei` standard error and `year_c` centred publication year as moderators and comparison with the standard `mod_arnold` model.
+
+::: {.writeup}
+We tested for publication bias using a multilevel meta-regression including the sampling standard error (small-study effect) and mean-centred publication year (time-lag effect) as moderators [@Nakagawa2021b]. There was `r if (metareg_full$pval[2] < 0.05) "evidence" else "no evidence"` of a small-study effect (slope = `r sprintf("%.2f", metareg_full$b[2])`, 95% CI `r sprintf("%.2f", metareg_full$ci.lb[2])` to `r sprintf("%.2f", metareg_full$ci.ub[2])`, *p* `r fmt_p(metareg_full$pval[2])`) and `r if (metareg_full$pval[3] < 0.05) "evidence" else "no evidence"` of a time-lag effect (slope = `r sprintf("%.4f", metareg_full$b[3])` per year, *p* `r fmt_p(metareg_full$pval[3])`). The bias-adjusted mean correlation between RMR and fitness was *r* = `r sprintf("%.2f", tanh(metareg_full$b[1]))` (95% CI `r sprintf("%.2f", tanh(metareg_full$ci.lb[1]))` to `r sprintf("%.2f", tanh(metareg_full$ci.ub[1]))`), compared with *r* = `r sprintf("%.2f", tanh(mod_arnold$b[1]))` without adjustment. Funnel plots and trim-and-fill (Supplementary Fig. S1) gave a qualitatively similar picture.
+:::

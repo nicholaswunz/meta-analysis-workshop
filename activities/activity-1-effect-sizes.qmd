@@ -1,0 +1,504 @@
+---
+title: "Activity 1: effect sizes and first models"
+---
+
+::: {.session-banner .practical}
+**Activity.** Read each task, try each step yourself, and only then open the 💡 *Solution* boxes. If you get stuck, peek at the solution, then close it and try again.
+:::
+
+# The data
+
+Both datasets were **simulated** for this workshop (see `scripts/simulate_data.R`) to look like a real comparative-physiology meta-analysis, but with known 'true' values.
+
+- **`sim_correlation.csv`**: 50 correlations (*r*) between metabolic rate and a performance or behavioural trait (sprint speed, endurance, exploration, activity) in vertebrate species. Each row is one correlation.
+- **`sim_contrast.csv`**: 50 comparisons of a physiological rate (resting or maximum metabolic rate, heart rate) between animals exposed to **experimental warming** (treatment) and **controls**. Each row is one treatment–control comparison. Several treatment groups can share one control group (same `comparison_ID`).
+
+Run this chunk first. It loads the packages and reads in both datasets.
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data handling and plots
+               metafor,     # meta-analysis
+               readxl)      # read Excel files into R
+
+# Workshop colours and plot style
+source(here::here("R", "theme_workshop.R"))
+
+# Read in the two simulated datasets from the data folder
+corr_dat     <- read.csv(here::here("data", "sim_correlation.csv"))
+contrast_dat <- read.csv(here::here("data", "sim_contrast.csv"))
+
+# Have a quick look: column names, column types and the first few values
+glimpse(corr_dat)
+glimpse(contrast_dat)
+```
+
+::: {.callout-note}
+## Column guide
+`study_ID` study; `study_year` publication year; `taxa`, `species`; `trait` measured trait; `sex`; `body_size` mean body mass (g); `comparison_ID` groups of effect sizes that share the same sample of animals (correlations) or the same control group (contrasts). Correlation data: `r` = correlation, `sample_size` = number of animals. Contrast data: `control_mean`, `control_sd`, `control_n` and `treatment_mean`, `treatment_sd`, `treatment_n`. Full details in the [data dictionary](../resources/data-dictionary.qmd).
+:::
+
+---
+
+# Task 1 – Correlation data
+
+**Goal:** turn each correlation (*r*) into Fisher's *Zr* and its sampling variance, first by hand in Excel and then in R, check that the two agree, and plot the results.
+
+## Step 1 – Calculate *Zr* and its sampling variance in Excel
+
+**What to do:** add three new values to every row of the correlation data: *Zr*, its sampling variance, and its standard error.
+
+$$
+Zr = \frac{1}{2}\ln\left(\frac{1+r}{1-r}\right), \qquad s^2_{Zr} = \frac{1}{N-3}, \qquad SE = \sqrt{s^2_{Zr}}
+$$
+
+1. Open `excel/correlation_template.xlsx` and go to the `data` sheet. Each row is one correlation; the correlation is in column **I** (`r`) and the sample size in column **J** (`sample_size`).
+2. Find the three empty orange columns: `Zr_excel` (column K), `v_Zr_excel` (column L) and `se_Zr_excel` (column M).
+3. Click on cell **K2** (first data row) and type the *Zr* formula, using cell `I2` for *r*. Excel's natural log is `LN()` (not `LOG()`, which is base 10).
+4. In **L2**, type the sampling-variance formula, using cell `J2` for *N*.
+5. In **M2**, type the standard-error formula, using cell `L2`.
+6. Select K2:M2 and drag the small square in the bottom-right corner down to row 51, so every row has values.
+7. Save the file as `.xlsx`. Don't rename the columns or sort the rows; you'll compare them with R in Step 3.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution: Excel formulas
+
+| Column | Formula in row 2 |
+|---|---|
+| `Zr_excel` (K) | `=0.5*LN((1+I2)/(1-I2))` (or the built-in `=FISHER(I2)`) |
+| `v_Zr_excel` (L) | `=1/(J2-3)` |
+| `se_Zr_excel` (M) | `=SQRT(L2)` |
+
+A completed workbook is in `excel/correlation_solution.xlsx`.
+:::
+
+## Step 2 – Calculate *Zr* in R with `escalc()`
+
+**What to do:** use `metafor::escalc()` to do the same calculation for all 50 rows at once.
+
+- `escalc()` needs three things: the type of effect size (`measure`), the columns holding the raw data, and the data frame.
+- For *Zr*, use `measure = "ZCOR"`, give it the correlation column (`ri = r`) and the sample-size column (`ni = sample_size`).
+- It returns the same data with two new columns: `yi` (the effect size, here *Zr*) and `vi` (its sampling variance).
+- Save the result as a new object called `corr_es`, then look at the first rows with `head()`.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a1-escalc
+# Calculate Zr (yi) and its sampling variance (vi) for every row
+corr_es <- escalc(measure = "ZCOR",      # Fisher's z-transformed correlation
+                  ri = r,                # column with the correlation
+                  ni = sample_size,      # column with the sample size
+                  data = corr_dat)
+
+# Add an ID number for each effect size (row 1, 2, 3, ...)
+corr_es$es_ID <- 1:nrow(corr_es)
+
+# Look at the first 6 rows of the columns we care about
+head(corr_es[, c("es_ID", "species", "r", "sample_size", "yi", "vi")])
+```
+:::
+
+## Step 3 – Compare the Excel and R calculations
+
+**What to do:** check that your Excel numbers match R's. Choose **one** option.
+
+**Option A (easier): compare by eye**
+
+1. In R, print the first five values of `yi` and `vi`: `head(corr_es$yi, 5)` and `head(corr_es$vi, 5)`.
+2. Compare them with the first five rows of `Zr_excel` and `v_Zr_excel` in your Excel file. They should be identical, apart from the number of decimal places shown.
+
+**Option B (more practice in R): compare in R**
+
+1. Read your saved workbook into R with `read_excel("path/to/your_file.xlsx", sheet = "data")`.
+2. Subtract the Excel values from the R values, row by row (e.g., `corr_es$yi - excel_corr$Zr_excel`).
+3. Find the largest difference with `max(abs(...))`. A number like `1e-16` means essentially zero.
+4. (Optional) Plot Excel against R values. If they match, all points sit on the 1:1 line.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a1-compare
+# Read the Excel file (replace the path with the path to YOUR saved workbook)
+excel_corr <- read_excel(here::here("excel", "correlation_solution.xlsx"), sheet = "data")
+
+# Difference between R and Excel for every row
+diff_Zr <- corr_es$yi - excel_corr$Zr_excel
+diff_v  <- corr_es$vi - excel_corr$v_Zr_excel
+
+# Largest absolute difference (should be essentially zero)
+max(abs(diff_Zr))
+max(abs(diff_v))
+```
+
+```{r}
+#| label: fig-a1-compare
+#| fig-cap: "Excel vs R: every point falls on the 1:1 line (dashed)."
+#| fig-height: 3.5
+#| fig-width: 4.5
+# Put the two sets of values side by side in one data frame, then plot
+compare_corr <- data.frame(Zr_excel = excel_corr$Zr_excel, Zr_R = corr_es$yi)
+
+ggplot(compare_corr, aes(x = Zr_excel, y = Zr_R)) +
+  geom_abline(slope = 1, intercept = 0, colour = pal["dark"], linetype = "dashed") +
+  geom_point(colour = pal["red"], size = 2, alpha = 0.7) +
+  labs(x = "Zr calculated in Excel", y = "Zr from metafor::escalc()")
+```
+
+**Do they match?** Yes. The differences are at the level of computer rounding (about 10^-15^). If yours do *not* match, the usual culprits are:
+
+- using `LOG()` (base 10) instead of `LN()`;
+- using *N* instead of *N* − 3;
+- rows being sorted differently in Excel.
+:::
+
+## Step 4 – Forest plot
+
+**What to do:** draw a forest plot showing every effect size with its 95% confidence interval (CI).
+
+- The quickest way is `metafor::forest()`. Give it the effect sizes (`x = corr_es$yi`) and their sampling variances (`vi = corr_es$vi`).
+- Useful extras: `slab =` adds a label for each row (e.g., the species name); `order =` sorts the rows (e.g., by effect size); `transf = tanh` back-transforms *Zr* to the correlation scale (*r*), which is easier to read.
+- **Optional:** the second solution shows how to make a similar plot with `ggplot2`, where the 95% CI is calculated by hand as $y_i \pm 1.96\sqrt{v_i}$.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: fig-a1-forest-base
+#| fig-cap: "Forest plot of the 50 Zr effect sizes made with metafor::forest(), back-transformed to the correlation scale."
+#| fig-height: 9
+#| fig-width: 7
+forest(x = corr_es$yi,                                 # effect sizes
+       vi = corr_es$vi,                                # sampling variances
+       slab = paste(corr_es$species, corr_es$trait),   # label: species + trait
+       transf = tanh,                                  # show correlations (r), not Zr
+       order = order(corr_es$yi),                      # sort from smallest to largest
+       col = "#e12744",                                # colour of the points
+       xlab = "Correlation (r)",
+       cex = 0.6)                                      # text size
+```
+
+**Optional: the same plot with ggplot2**
+
+```{r}
+#| label: fig-a1-forest-gg
+#| fig-cap: "ggplot2 forest plot of Zr (± 95% CI), sorted by effect size and coloured by taxon."
+#| fig-height: 8.5
+# 1. Calculate the lower and upper 95% CI for each effect size
+corr_es$lower <- corr_es$yi - 1.96 * sqrt(corr_es$vi)
+corr_es$upper <- corr_es$yi + 1.96 * sqrt(corr_es$vi)
+
+# 2. Plot: one row per effect size, sorted by yi using reorder()
+ggplot(corr_es, aes(x = yi, y = reorder(paste(es_ID, species), yi), colour = taxa)) +
+  geom_vline(xintercept = 0, colour = "grey50") +            # line of no effect
+  geom_errorbar(aes(xmin = lower, xmax = upper), width = 0, orientation = "y") +
+  geom_point() +
+  scale_colour_manual(values = taxa_cols) +
+  labs(x = "Fisher's Zr (± 95% CI)", y = NULL, colour = NULL) +
+  theme(axis.text.y = element_text(size = 7))
+```
+:::
+
+### Questions
+
+1. **How many of the 50 correlations have a 95% CI that excludes zero?**
+   *Hint:* a CI excludes zero if its lower limit is above 0 **or** its upper limit is below 0. Count these in the forest plot, or calculate the CIs in R (as in the ggplot solution) and use `sum()` on a TRUE/FALSE condition.
+2. **Which effect sizes have the widest CIs, and why?**
+   *Hint:* look at the formula for $s^2_{Zr}$. Which column is it calculated from? Compare the `sample_size` of the effect sizes with the widest and narrowest CIs.
+
+::: {.callout-tip collapse="true"}
+## 💡 Answers
+```{r}
+#| label: a1-answers
+
+# 1. Count CIs that exclude zero (lower > 0 OR upper < 0); TRUE counts as 1 in sum()
+sum(corr_es$lower > 0 | corr_es$upper < 0)
+
+# 2. Calculate the width of each CI, then show the 5 widest
+corr_es$ci_width <- corr_es$upper - corr_es$lower
+
+corr_es %>%
+  select(species, sample_size, ci_width) %>%
+  arrange(desc(ci_width)) %>%   # widest first
+  head(5)
+```
+The widest CIs belong to the studies with the **smallest sample sizes**, because $s^2_{Zr} = 1/(N-3)$ depends **only** on sample size.
+:::
+
+---
+
+# Task 2 – Contrast data
+
+**Goal:** calculate the **log response ratio** (lnRR) of warmed (treatment) vs control animals, in Excel and in R, compare them, and plot them.
+
+$$
+lnRR = \ln\left(\frac{M_{1}}{M_{2}}\right), \qquad
+s^2_{lnRR} = \frac{SD_{1}^2}{M^2_{1}N_{1}} + \frac{SD_{2}^2}{M^2_{2}N_{2}}
+$$
+
+Here, group 1 is the warmed (treatment) group and group 2 is the control group; $M$ is the mean, $SD$ the standard deviation and $N$ the sample size. A positive lnRR means the warmed group has a higher rate than the control.
+
+## Step 1 – lnRR in Excel
+
+**What to do:** fill in lnRR and its sampling variance for every row.
+
+1. Open `excel/contrast_template.xlsx` (`data` sheet). The control mean, SD and *n* are in columns **I, J, K**; the treatment mean, SD and *n* are in columns **L, M, N**.
+2. In **O2** (`lnRR_excel`), type the lnRR formula: the natural log of treatment mean ÷ control mean.
+3. In **P2** (`v_lnRR_excel`), type the sampling-variance formula. Build it in two parts: first the treatment part, $SD_{1}^2 / (M^2_{1}N_{1})$, then add the control part. Use `^2` for "squared" and plenty of brackets.
+4. Drag both formulas down to row 51 and save.
+
+**Extension (if you finish early): Hedges' *g* (SMD).** The template has helper columns to build it step by step:
+
+1. `sd_pooled` (Q): $SD_{p} = \sqrt{\frac{\left( N_{1}-1 \right)SD_{1}^2 + \left( N_{2}-1 \right)SD_{2}^2}{N_{1} + N_{2} - 2}}$
+2. `J_correction` (R): $J = 1 - \frac{3}{4\left(N_{1} + N_{2} - 2\right) - 1}$, a small-sample correction.
+3. `SMD_excel` (S): (treatment mean − control mean) ÷ `sd_pooled` × `J_correction`.
+4. `v_SMD_excel` (T): $\frac{N_{1} + N_{2}}{N_{1}N_{2}} + \frac{SMD^2}{2(N_{1} + N_{2})}$
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution: Excel formulas
+
+| Column | Formula in row 2 |
+|---|---|
+| `lnRR_excel` (O) | `=LN(L2/I2)` |
+| `v_lnRR_excel` (P) | `=M2^2/(N2*L2^2) + J2^2/(K2*I2^2)` |
+| `sd_pooled` (Q) | `=SQRT(((N2-1)*M2^2 + (K2-1)*J2^2)/(N2+K2-2))` |
+| `J_correction` (R) | `=1-3/(4*(N2+K2-2)-1)` |
+| `SMD_excel` (S) | `=(L2-I2)/Q2*R2` |
+| `v_SMD_excel` (T) | `=(N2+K2)/(N2*K2) + S2^2/(2*(N2+K2))` |
+
+A completed workbook is in `excel/contrast_solution.xlsx`.
+:::
+
+## Step 2 – lnRR in R
+
+**What to do:** use `escalc()` again, this time with `measure = "ROM"` (**R**atio **O**f **M**eans = lnRR).
+
+- Group **1** is the numerator (treatment): `m1i` = mean, `sd1i` = SD, `n1i` = sample size.
+- Group **2** is the denominator (control): `m2i`, `sd2i`, `n2i`.
+- Getting the groups the wrong way round flips the sign of every effect size, so double-check them.
+- Save the result as `contrast_es`.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a2-escalc
+# Calculate lnRR (yi) and its sampling variance (vi) for every row
+contrast_es <- escalc(measure = "ROM",          # log response ratio ('ratio of means')
+                      m1i = treatment_mean,     # group 1 = treatment (numerator)
+                      sd1i = treatment_sd,
+                      n1i = treatment_n,
+                      m2i = control_mean,       # group 2 = control (denominator)
+                      sd2i = control_sd,
+                      n2i = control_n,
+                      data = contrast_dat)
+
+# Add an ID number for each effect size
+contrast_es$es_ID <- 1:nrow(contrast_es)
+
+# Look at the first 6 rows of the columns we care about
+head(contrast_es[, c("es_ID", "species", "trait", "treatment_mean", "control_mean", "yi", "vi")])
+```
+:::
+
+## Step 3 – Compare
+
+**What to do:** as in Task 1, check that Excel and R agree. Use **Option A** (compare the first five rows by eye) or **Option B** (read the workbook into R and calculate the largest difference).
+
+**Extension:** if you calculated Hedges' *g* in Excel, also calculate it in R with `escalc(measure = "SMD", ...)` (same arguments as above) and compare. Do they match exactly?
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a2-compare
+# Read the Excel file (replace the path with the path to YOUR saved workbook)
+excel_con <- read_excel(here::here("excel", "contrast_solution.xlsx"), sheet = "data")
+
+# lnRR and its variance: largest difference between R and Excel
+max(abs(contrast_es$yi - excel_con$lnRR_excel))
+max(abs(contrast_es$vi - excel_con$v_lnRR_excel))
+
+# Extension: Hedges' g in R
+smd_r <- escalc(measure = "SMD",               # Hedges' g
+                m1i = treatment_mean,
+                sd1i = treatment_sd,
+                n1i = treatment_n,
+                m2i = control_mean,
+                sd2i = control_sd,
+                n2i = control_n,
+                data = contrast_dat)
+
+max(abs(smd_r$yi - excel_con$SMD_excel))
+```
+
+- **lnRR and its variance match exactly** (differences ≈ 10^-16^).
+- **Hedges' *g* differs very slightly** (≈ 10^-4^). This is *not* a mistake. `escalc()` uses the *exact* small-sample correction *J*, whereas the Excel formula uses a common approximation. The two agree to three or four decimal places.
+:::
+
+## Step 4 – Forest plot
+
+**What to do:** make a forest plot of the 50 lnRR values, as in Task 1, Step 4.
+
+- Use `forest()` with `contrast_es$yi` and `contrast_es$vi`.
+- lnRR is easier to read as a **% change**. Back-transform with `transf = function(x) 100 * (exp(x) - 1)`, so 0 = no change and 25 = a 25% increase.
+- Label the rows with species and trait, and sort them by effect size.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: fig-a2-forest
+#| fig-cap: "Forest plot of the 50 lnRR effect sizes, back-transformed to % change (treatment vs control)."
+#| fig-height: 9
+#| fig-width: 7
+forest(x = contrast_es$yi,
+       vi = contrast_es$vi,
+       slab = paste(contrast_es$species, contrast_es$trait),   # label: species + trait
+       transf = function(x) 100 * (exp(x) - 1),                # lnRR -> % change
+       refline = 0,                                            # 0% = no change
+       order = order(contrast_es$yi),                          # sort by effect size
+       col = "#e12744",                                        # colour of the points
+       xlab = "% change with warming",
+       cex = 0.6)
+```
+:::
+
+### Questions
+
+1. **Express the largest lnRR as a percentage change.**
+   *Steps:* (a) find the largest `yi`, either with `max(contrast_es$yi)` or by sorting the data; (b) convert it with $100 \times (e^{\text{lnRR}} - 1)$; (c) which species and trait does it belong to?
+2. **Pick a `comparison_ID` that appears in more than one row. What is identical across its rows, and why could this be a problem for a meta-analysis that assumes independent effect sizes?**
+   *Steps:* (a) count how many rows each `comparison_ID` has with `contrast_es %>% count(comparison_ID)`; (b) choose one with `n` of 2 or more; (c) use `filter()` to look at those rows and compare the control columns with the treatment columns.
+
+::: {.callout-tip collapse="true"}
+## 💡 Answers
+```{r}
+#| label: a2-answers
+
+# 1. Find the row with the largest lnRR
+biggest <- contrast_es %>%
+  filter(yi == max(yi))
+
+biggest[, c("species", "trait", "yi")]
+
+# Convert it to a % change
+# (as.numeric() drops some extra information that escalc() attaches to yi)
+100 * (exp(as.numeric(biggest$yi)) - 1)
+
+# 2. How many rows does each comparison_ID have?
+contrast_es %>%
+  count(comparison_ID)
+
+# Look at one comparison with more than one row (here comparison 13, which has 3 rows)
+contrast_es %>%
+  filter(comparison_ID == 13) %>%
+  select(comparison_ID, control_mean, control_sd, control_n, treatment_mean, yi)
+```
+The **control group** (mean, SD, *N*) is identical in every row of the same comparison: several warmed groups were compared with **one shared control**. These effect sizes are therefore not independent. If the control mean happens to be low by chance, *all* lnRRs in that comparison are inflated together. We deal with this in [Activity 2](activity-2-multilevel.qmd).
+:::
+
+---
+
+# Task 3 – Fixed-effect vs random-effects models
+
+**Goal:** combine the 50 lnRR values into one overall estimate using two different models, and compare them.
+
+- **Fixed-effect model** (`method = "EE"`): assumes all studies estimate **one** true effect; each effect size is weighted by $1/v_i$.
+- **Random-effects model** (`method = "REML"`): assumes true effects **vary** among studies (variance $\tau^2$); weights are $1/(v_i + \tau^2)$.
+
+## Step 1 – Fit both models
+
+**What to do:** use `rma()` twice on `contrast_es`, once with `method = "EE"` and once with `method = "REML"`. Give it the effect sizes (`yi = yi`), the sampling variances (`vi = vi`) and the data. Save the models as `mod_fe` and `mod_re`, then print each one by typing its name.
+
+In the printout, look for: `estimate` (the overall mean), `ci.lb` and `ci.ub` (its 95% CI), and, for the random-effects model only, `tau^2`.
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a3-models
+# Fixed-effect model
+mod_fe <- rma(yi = yi,
+              vi = vi,
+              method = "EE",
+              data = contrast_es)
+
+# Random-effects model
+mod_re <- rma(yi = yi,
+              vi = vi,
+              method = "REML",
+              data = contrast_es)
+
+mod_fe
+mod_re
+```
+:::
+
+## Step 2 – Compare the two models
+
+**What to do:**
+
+1. Make a small table with one row per model and columns for the estimate, its SE, and the lower and upper 95% CI. You can pull these numbers out of a model with `$`, e.g., `mod_fe$b` (estimate), `mod_fe$se`, `mod_fe$ci.lb`, `mod_fe$ci.ub`.
+2. Convert both estimates to a % change: $100 \times (e^{\text{lnRR}} - 1)$.
+3. **Optional:** compare the weights each model gives to each effect size with `weights(mod_fe)` and `weights(mod_re)` (they are % of the total weight).
+
+::: {.callout-tip collapse="true"}
+## 💡 Solution
+```{r}
+#| label: a3-compare
+# One row per model
+model_compare <- data.frame(
+  model    = c("Fixed effect", "Random effects"),
+  estimate = c(mod_fe$b,     mod_re$b),
+  se       = c(mod_fe$se,    mod_re$se),
+  ci_lb    = c(mod_fe$ci.lb, mod_re$ci.lb),
+  ci_ub    = c(mod_fe$ci.ub, mod_re$ci.ub)
+)
+
+# Convert the estimates to a % change
+model_compare$percent_change <- 100 * (exp(model_compare$estimate) - 1)
+
+model_compare
+```
+
+```{r}
+#| label: fig-a3-forest
+#| fig-cap: "Overall estimates (± 95% CI) from the two models."
+#| fig-height: 2
+#| fig-width: 6
+ggplot(model_compare, aes(x = estimate, y = model)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(xmin = ci_lb, xmax = ci_ub), width = 0.15, orientation = "y") +
+  geom_point(shape = 18, size = 5, colour = pal["red"]) +
+  labs(x = "Overall lnRR (± 95% CI)", y = NULL)
+```
+
+**Optional: weights**
+
+```{r}
+#| label: fig-a3-weights
+#| fig-cap: "Weight (%) of each effect size in the two models, against its precision (1/SE). The random-effects model gives much more even weights."
+#| fig-height: 4
+# Precision and weight of each effect size, stacked for the two models
+weights_dat <- data.frame(
+  precision = rep(1 / sqrt(contrast_es$vi), 2),          # the same precisions, twice
+  weight    = c(weights(mod_fe), weights(mod_re)),       # weights from each model
+  model     = rep(c("Fixed effect", "Random effects"), each = nrow(contrast_es))
+)
+
+ggplot(weights_dat, aes(x = precision, y = weight, colour = model)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_colour_manual(values = unname(pal[c("dark", "red")]), name = NULL) +
+  labs(x = "Precision (1 / SE)", y = "Weight (%)")
+```
+:::
+
+### What are the differences in the overall estimates?
+
+Think about: (1) the size of the two estimates; (2) the width of their CIs; (3) which effect sizes get the most weight in each model; (4) which model better matches biological reality when studies use different species and conditions.
+
+::: {.callout-tip collapse="true"}
+## 💡 Answer
+- **Point estimate.** The two means are `r sprintf("%.3f", mod_fe$b[1])` (fixed) and `r sprintf("%.3f", mod_re$b[1])` (random). Here they are similar, but they *need not* be. The fixed-effect model gives most of the weight to a few very precise effect sizes, while the random-effects model spreads the weight more evenly.
+- **Uncertainty.** The random-effects CI is **wider** (SE `r sprintf("%.3f", mod_re$se)` vs `r sprintf("%.3f", mod_fe$se)`) because it accounts for true effects varying among studies ($\tau^2$ = `r sprintf("%.3f", mod_re$tau2)`). When there is heterogeneity, the fixed-effect CI is too narrow.
+- **Question answered.** The fixed-effect model estimates *the* common effect of these particular studies. The random-effects model estimates the **average of a distribution of true effects**, which lets us generalise to other species and studies. This is almost always the question we care about in comparative physiology.
+- **Caveat.** Both models still treat all 50 effect sizes as independent, ignoring that several come from the same study, share a control group or involve related species. That is the job of [Activity 2](activity-2-multilevel.qmd). 🙂
+:::

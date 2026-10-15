@@ -1,0 +1,559 @@
+---
+title: "Fixed, random and multilevel models"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis
+               patchwork)   # place ggplots side by side
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+# Fixed-effect vs random-effects models
+
+If you're familiar with the meta-analysis literature, you will have heard of 'fixed' and 'random' effect meta-analysis [@Borenstein2009; @NakagawaSantos2012; @Koricheva2013; @Gurevitch2018; @Nakagawa2017; @Gurevitch1999]. Understanding the differences between these two models is fundamentally important to understanding meta-analysis more generally. Also, once you understand the difference, you'll realise why fixed-effect meta-analyses are not something we should normally apply in ecology and evolution. The assumptions are not very sensible when we are talking about highly variable meta-analytic data taken from many, many species. In fact, even a random-effects meta-analysis is not going to cut it in most cases (more on that later).
+
+Despite their limitations, these models have an important place in the meta-analytic literature. They are also excellent stepping stones to understanding the assumptions inherent to meta-analytic models and how we can build these models more appropriately for our kind of data.
+
+This tutorial will walk you through the differences between fixed- and random-effects models, with a focus on understanding how we are synthesising different effect sizes across studies. By the end of this tutorial, we hope you understand:
+
+1. The distinct difference between fixed- and random-effects meta-analytic models
+2. How to fit these models using `metafor` (the most popular package for meta-analysis in *R*)
+3. How to interpret the output from each model
+4. Why multilevel models are usually needed for data in comparative physiology
+
+## Fixed-effect (common-effect) model
+
+$$
+\begin{aligned}
+y_{i} &= \mu + m_{i} \\
+m_{i} &\sim N(0, v_{i})
+\end{aligned}
+$$
+
+Here, $y_{i}$ is the *i*th effect size estimate and $m_{i}$ is the sampling error (deviation from $\mu$) for effect size *i*, drawn from a normal distribution with a mean of 0 and a known sampling variance, $v_{i}$. Every study estimates **the same** true effect, $\mu$; observed effects differ only because of sampling error. The weights are $w_{i} = 1/v_{i}$.
+
+## Random-effects model
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{i} &\sim N(0, \tau^2)
+\end{aligned}
+$$
+
+We now have an additional source of variation, $s_{i}$, which is the study-specific deviation. **Each study has its own true mean effect ($\mu + s_{i}$), and these true effects are distributed around the overall mean, $\mu$, with a between-study variance, $\tau^2$ (read, tau-squared)**. The weights are $w_{i} = 1/(v_{i} + \tau^2)$, and $\tau^2$ is estimated from the data (by default with restricted maximum likelihood, **REML**).
+
+```{r}
+#| label: fig-fe-re
+#| echo: false
+#| fig-cap: "Left: under a fixed-effect model, all studies estimate one true effect (dashed line); observed effects (filled points) scatter only because of sampling error. Right: under a random-effects model, each study has its own true effect (open circles), drawn from a distribution with mean μ and variance τ²; observed effects scatter around those."
+#| fig-height: 4
+
+# Simulate 8 studies with a true overall mean of 0.3
+set.seed(7)
+k <- 8
+
+illus <- tibble(study = 1:k,
+                vi = runif(k, 0.005, 0.03)) %>%                 # sampling variances
+  mutate(theta_re = 0.3 + rnorm(k, mean = 0, sd = 0.15),       # each study's true effect
+         y_fe = 0.3 + rnorm(k, mean = 0, sd = sqrt(vi)),        # observed: fixed effect
+         y_re = theta_re + rnorm(k, mean = 0, sd = sqrt(vi)),   # observed: random effects
+         y_fe_lb = y_fe - 1.96 * sqrt(vi), y_fe_ub = y_fe + 1.96 * sqrt(vi),
+         y_re_lb = y_re - 1.96 * sqrt(vi), y_re_ub = y_re + 1.96 * sqrt(vi))
+
+# The distribution of true effects (mean 0.3, SD 0.15), scaled to fit the plot
+dist_curve <- tibble(x = seq(-0.2, 0.9, by = 0.005)) %>%
+  mutate(d = dnorm(x, mean = 0.3, sd = 0.15),
+         height = d / max(d) * 3 + 0.4)
+
+p_fe <- ggplot(illus, aes(y = study)) +
+  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  geom_errorbar(aes(xmin = y_fe_lb, xmax = y_fe_ub), width = 0, orientation = "y", colour = "grey50") +
+  geom_point(aes(x = y_fe), size = 2.5, colour = pal["red"]) +
+  scale_y_continuous(breaks = 1:k) +
+  coord_cartesian(xlim = c(-0.2, 0.9)) +
+  labs(x = "Effect size", y = "Study", title = "Fixed effect")
+
+p_re <- ggplot(illus, aes(y = study)) +
+  geom_area(data = dist_curve, aes(x = x, y = height),
+            fill = pal["light"], alpha = 0.6) +
+  geom_vline(xintercept = 0.3, linetype = "dashed", colour = pal["dark"]) +
+  geom_errorbar(aes(xmin = y_re_lb, xmax = y_re_ub), width = 0, orientation = "y", colour = "grey50") +
+  geom_point(aes(x = theta_re), shape = 1, size = 3, colour = pal["dark"]) +
+  geom_point(aes(x = y_re), size = 2.5, colour = pal["red"]) +
+  scale_y_continuous(breaks = 1:k) +
+  coord_cartesian(xlim = c(-0.2, 0.9)) +
+  labs(x = "Effect size", y = NULL, title = "Random effects")
+
+p_fe + p_re
+```
+
+::: {.callout-important}
+## Which one should I use?
+In comparative physiology, studies differ in species, life stages, protocols, temperatures and labs, so **a single common effect is biologically implausible**. Random-effects (and, as we'll see, multilevel) models should be the default [@Nakagawa2017; @Noble2022]. The fixed-effect model answers a narrower question: *what is the weighted average of these particular studies?*
+:::
+
+# Annotated code: `rma()`
+
+We use the @WuSeebacher2022 correlations between **metabolism** and movement (activity, exploration and dispersal). First, we load `ind_disp_raw_data.csv` and calculate the effect sizes (`yi`) and sampling variances (`vi`) with `escalc()`.
+
+```{r}
+#| label: data
+
+# Download the data
+wu_met <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv")
+
+# Keep the columns we need, and only the effect sizes for metabolic traits
+wu_met <- wu_met %>%
+  select(study_ID, taxa, species, trait, response, response_unit,
+         disp_trait, disp_unit, corr_coeff, sample_size) %>%
+  filter(trait == "Metabolism")
+
+# Give every effect size (row) its own ID; we need this later for rma.mv()
+wu_met$es_ID <- 1:nrow(wu_met)
+
+# Calculate Zr (yi) and its sampling variance (vi)
+wu_met <- escalc(measure = "ZCOR",
+                 ri = corr_coeff,
+                 ni = sample_size,
+                 data = wu_met)
+
+# How many effect sizes, studies and species do we have?
+nrow(wu_met)                      # number of effect sizes
+length(unique(wu_met$study_ID))   # number of studies
+length(unique(wu_met$species))    # number of species
+```
+
+First, we fit a fixed-effect model with the `rma()` function by setting `method = "EE"` ('equal effects', another name for the fixed-effect model).
+
+```{r}
+#| label: rma-fe
+
+# Fixed-effect model
+mod_fe <- rma(yi = yi,          # effect sizes
+              vi = vi,          # sampling variances
+              method = "EE",    # fixed-effect ('equal effects') model
+              data = wu_met)
+
+summary(mod_fe)
+```
+
+Now we fit a random-effects model. The only change is the `method` argument, which now estimates $\tau^2$ with REML.
+
+```{r}
+#| label: rma-re
+
+# Random-effects model
+mod_re <- rma(yi = yi,          # effect sizes
+              vi = vi,          # sampling variances
+              method = "REML",  # restricted maximum likelihood estimate of tau^2
+              test = "t",       # t-distribution rather than z for tests and CIs (more conservative)
+              data = wu_met)
+
+summary(mod_re)
+```
+
+### Interpreting the output
+
+| Part of the output | Meaning |
+|---|---|
+| `Random-Effects Model (k = ...)` | number of effect sizes |
+| `logLik`, `deviance`, `AIC` ... | fit statistics (compare models fitted with `method = "ML"`) |
+| `tau^2 (estimated amount of total heterogeneity)` | between-effect variance of the true effects; `tau` is its square root (an SD on the *Zr* scale) |
+| `I^2` | % of the total variation that is due to heterogeneity rather than sampling error (see [Heterogeneity](heterogeneity.qmd)) |
+| `H^2` | total variance / sampling variance |
+| `Test for Heterogeneity: Q(df = k-1)` | is there more variation than expected from sampling error alone? |
+| `Model Results: estimate` | the overall (meta-analytic) mean, $\mu$ |
+| `se`, `tval`, `df`, `pval` | its standard error and *t*-test against zero |
+| `ci.lb`, `ci.ub` | 95% confidence interval of the mean |
+
+Notice that the overall mean of the fixed-effect model (`r round(mod_fe$b[1], 3)`) has a much narrower 95% confidence interval than the random-effects model (`r round(mod_re$b[1], 3)`). The fixed-effect model ignores the variation among studies, so it is over-confident.
+
+# Why we need multilevel models
+
+Ecological and evolutionary meta-analyses more often than not need much more sophisticated multilevel meta-analytic models than random-effects models [@NakagawaSantos2012; @Hadfield2010; @Noble2017]. Biological data from field- and lab-based experiments are highly structured – **many studies could be done on the same species, or by the same lab group or student sharing similar methodology** [@Noble2017; @NakagawaSantos2012]. In addition, we might have many effect size estimates from a single study because many traits are measured, or many treatments are applied [@Noble2017]. This adds complexity to the data set and also results in special types of non-independence that are somewhat unique to meta-analysis – especially when using contrast-based effect sizes like Hedges' *g*, log response ratios and log odds ratios [@Noble2017].
+
+In the past, complex non-independence was often dealt with by:
+
+1. conducting separate meta-analyses on subsets of non-independent data, usually using random-effects models;
+2. taking one or only a subset of effect size estimates from a single study to reduce non-independence; and/or
+3. averaging effect size estimates from a single study and modelling the average [@NakagawaSantos2012].
+
+**These approaches can be problematic because discarding useful effect size data results in a loss of statistical power, or even inflated Type I error rates if average effect sizes were not calculated in a way that accounts for non-independence [@Nakagawa2021]**. Furthermore, removing effect size estimates from an analysis prevents the estimation of biologically and methodologically relevant information that can help shape the field [@NakagawaSantos2012; @Nakagawa2021]. While the above approaches could still be useful at times, where possible, we recommend that you model all available data [@Nakagawa2021; @Noble2017; @NakagawaSantos2012].
+
+Here, we'll first focus on simple multilevel meta-analysis models and how to interpret them. We'll then work our way up to including more complex forms of non-independence, such as phylogenetic meta-analysis and accounting for shared controls. Technically, all these sources could be built into a single model, but this requires a substantial amount of data. Sometimes it will not be possible to deal with all sources of non-independence, in which case it's important to conduct sensitivity analyses to understand how your conclusions and inferences are affected by the analytical decisions made [@Noble2017]. **Strong justification for your choices is always essential**.
+
+## Simple multilevel meta-analytic model
+
+Recall that a random-effects model is defined as follows:
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{i} &\sim N(0, \tau^2)
+\end{aligned}
+$$
+
+In this model, $y_{i}$ is the *i*th effect size estimate and $m_{i}$ is the sampling error (deviation from $\mu$) for effect size *i*. Given that we have a single effect size estimate from each study, we can include $s_{i}$, which is the study-specific deviation, and this allows us to estimate a 'residual' variance in this model. That's because, after we remove the known sampling variance, there is likely to be 'extra' variability among effect sizes at the effect/study level (in this case, these are confounded because we have one effect per study). We can estimate that explicitly, which is what we are doing here.
+
+**The challenge with having a single effect estimate per study is that the within- and between-study variances are confounded**. In other words, we cannot estimate both.
+
+More commonly, we can extract many (sometimes a lot of) effect size estimates from a single study. These could be effects from different experimental treatments, at different time points or on different traits. These effects are not independent of each other, and there is likely to be a substantial amount of within-study variation in addition to the among-study variation [@NakagawaSantos2012]. We can now estimate these two sources of variability explicitly, turning our model into the simplest form of a multilevel meta-analytic model:
+
+$$
+\begin{aligned}
+y_{i,j} &= \mu + s_{j} + e_{i,j} + m_{i,j} \\
+m_{i,j} &\sim N(0, v_{i,j}) \\
+s_{j} &\sim N(0, \tau^2) \\
+e_{i,j} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+You'll notice that the notation changes slightly – $y_{i,j}$ is now the *i*th effect size from study *j*, and $m_{i,j}$ is the sampling error of effect size *i* from study *j*, with known sampling variance $v_{i,j}$. $s_{j}$ is now the **study-specific effect**, *j*, applied to the *i*th effect size, where *j* = 1,...,$N_{studies}$. We have also added a random effect ($e_{i,j}$) to the model. **$e_{i,j}$ is the effect-size-specific (within-study) effect**. This is often referred to as a 'residual' effect [@NakagawaSantos2012] and is used to estimate a residual variance (@fig-hierarchy).
+
+```{r}
+#| label: fig-hierarchy
+#| echo: false
+#| fig-cap: "The three levels of a multilevel meta-analysis. Effect sizes (level 2) are nested within studies (level 3); sampling error (level 1) has a known variance, v."
+#| fig-height: 3
+#| fig-width: 8
+
+# The boxes (nodes) in the diagram
+nodes <- tibble(
+  label = c("Overall mean μ", "Study 1", "Study 2", "Study 3",
+            "es 1", "es 2", "es 3", "es 4", "es 5", "es 6"),
+  x     = c(3.5, 1.5, 3.5, 5.5, 1, 2, 3, 4, 5, 6),
+  y     = c(3, 2, 2, 2, 1, 1, 1, 1, 1, 1),
+  level = c("mean", "study", "study", "study", "es", "es", "es", "es", "es", "es")
+)
+
+# The lines (edges) joining the boxes
+edges <- tibble(x    = c(3.5, 3.5, 3.5, 1.5, 1.5, 3.5, 3.5, 5.5, 5.5),
+                y    = c(3,   3,   3,   2,   2,   2,   2,   2,   2),
+                xend = c(1.5, 3.5, 5.5, 1,   2,   3,   4,   5,   6),
+                yend = c(2,   2,   2,   1,   1,   1,   1,   1,   1))
+
+# Text on the right-hand side
+level_text <- tibble(x = 7,
+                     y = c(3, 2, 1),
+                     label = c("Overall mean (μ)",
+                               "Level 3: studies (τ²)",
+                               "Level 2: effect sizes (σ²e)\nLevel 1: sampling error (known v)"))
+
+ggplot() +
+  geom_segment(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
+               colour = "grey60") +
+  geom_label(data = nodes, aes(x = x, y = y, label = label, fill = level),
+             colour = "white", fontface = "bold", size = 3.3) +
+  geom_text(data = level_text, aes(x = x, y = y, label = label),
+            hjust = 0, size = 3.4, colour = "grey30") +
+  scale_fill_manual(values = c(mean = pal[["dark"]], study = pal[["darkred"]], es = pal[["red"]]),
+                    guide = "none") +
+  coord_cartesian(xlim = c(0.5, 9.5), ylim = c(0.6, 3.2), clip = "off") +
+  theme_void()
+```
+
+## Building more complex multilevel meta-analytic models
+
+In reality, we may also have lots of studies on a specific set of species. For example, common or economically important species, like salmon and trout, or lab model organisms like zebrafish, might be **over-represented in the data set**. This adds an additional level of structure to our data. We can account for species in this model by adding another random effect that captures the similarities between effect size estimates from the same species. As such, we can expand our multilevel model as follows:
+
+$$
+\begin{aligned}
+y_{i,j,k} &= \mu + s_{j} + spp_{k} + e_{i,j,k} + m_{i,j,k} \\
+m_{i,j,k} &\sim N(0, v_{i,j,k}) \\
+s_{j} &\sim N(0, \tau^2) \\
+spp_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i,j,k} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+Here, $y_{i,j,k}$ is now the *i*th effect size from study *j* and species *k*. $m_{i,j,k}$ is the sampling error of effect size *i* from study *j* and species *k*. $e_{i,j,k}$ is the effect-size-specific (within-study) effect applied to each effect *i* from study *j* and species *k*. $s_{j}$ is still the study-specific effect, *j*, applied to the *i*th effect size, where *j* = 1,...,$N_{studies}$, but now $spp_{k}$ is the **species-specific effect**, *k*, applied to the *i*th effect size, where *k* = 1,...,$N_{species}$.
+
+As you can imagine, the notation can get quite complicated the more levels you add. As such, a simplification of the above model notation that you might read [e.g., @NakagawaSantos2012; @Noble2017] is as follows:
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{j} &\sim N(0, \tau^2) \\
+spp_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+# Annotated code: `rma.mv()`
+
+Here are two examples that use the `rma.mv()` function to build multilevel models.
+
+::: {.panel-tabset}
+
+## Zr
+
+Here, we include `study_ID` and `es_ID` as random effects to account for between-study and within-study effects, respectively.
+
+```{r}
+#| label: rma-mv
+
+# Multilevel meta-analytic model
+mod_ml <- rma.mv(yi = yi,                         # effect sizes
+                 V = vi,                          # sampling variances (or a full matrix)
+                 random = list(~ 1 | study_ID,    # between-study random effect
+                               ~ 1 | es_ID),      # within-study (effect size) random effect
+                 method = "REML",
+                 test = "t",                      # t-tests ...
+                 dfs = "contain",                 # ... with 'containment' degrees of freedom
+                 data = wu_met)
+
+summary(mod_ml)
+```
+
+### Interpreting the output
+
+- **Variance components**: `sigma^2.1` (`study_ID`) = `r sprintf("%.4f", mod_ml$sigma2[1])` and `sigma^2.2` (`es_ID`) = `r sprintf("%.4f", mod_ml$sigma2[2])`. `nlvls` tells you how many levels each factor has – always check that these match your data!
+- **`estimate`** = `r sprintf("%.3f", mod_ml$b[1])` is the overall mean *Zr*, i.e., *r* = `r sprintf("%.3f", tanh(mod_ml$b[1]))`.
+- **`dfs = "contain"`** uses the number of studies (not effect sizes) to set the degrees of freedom of the *t*-test – a more honest test when effects are clustered.
+
+The **intra-class correlation** tells us how similar effect sizes from the same study are:
+
+```{r}
+#| label: icc
+
+# Proportion of the (non-sampling) variance that is among studies
+icc_study <- mod_ml$sigma2[1] / sum(mod_ml$sigma2)
+icc_study
+```
+
+### Comparing the models
+
+```{r}
+#| label: compare
+
+# A table comparing the overall mean from the random-effects and multilevel models
+model_comparison <- data.frame(
+  model    = c("Random effects (ignores studies)", "Multilevel"),
+  estimate = c(mod_re$b[1],  mod_ml$b[1]),    # overall mean (Zr)
+  se       = c(mod_re$se,    mod_ml$se),      # standard error
+  ci_lb    = c(mod_re$ci.lb, mod_ml$ci.lb),   # lower 95% CI
+  ci_ub    = c(mod_re$ci.ub, mod_ml$ci.ub)    # upper 95% CI
+)
+
+# Back-transform the mean Zr to a correlation, r
+model_comparison$r <- tanh(model_comparison$estimate)
+
+model_comparison
+```
+
+The multilevel model has a **larger standard error**: it correctly recognises that `r nrow(wu_met)` effect sizes from `r length(unique(wu_met$study_ID))` studies contain less independent information than `r nrow(wu_met)` independent studies would.
+
+::: {.callout-note}
+## Robust variance estimation (RVE)
+As a safeguard against a mis-specified random-effects or sampling covariance structure, we can compute **cluster-robust** standard errors with study as the cluster [@Pustejovsky2021; @Yang2024]:
+
+```{r}
+#| label: robust
+
+# Cluster-robust standard errors, with study as the cluster
+robust(mod_ml,
+       cluster = wu_met$study_ID,
+       clubSandwich = TRUE)   # small-sample correction
+```
+:::
+
+## ARR
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/pottier.png)
+
+Here is another example, where we turn to @Pottier2021, who used the acclimation response ratio (ARR) to analyse thermal acclimation responses in $CT_{max}$ and how these differ between the sexes. We'll keep it simple for the moment and focus exclusively on a single sex.
+
+### Download data and functions for $ARR$
+
+We'll download the raw data from the paper again.
+
+```{r}
+#| label: arr-data
+
+# Download the data from the Open Science Framework (OSF)
+asr_dat <- read.csv("https://osf.io/qn2af/download")
+```
+
+We'll also need our function for calculating ARR and its sampling variance (from the [Effect sizes](../foundations/effect-sizes.qmd) page), because these don't exist in any current packages.
+
+```{r}
+#| label: arr-function
+
+# arr(): calculates the acclimation response ratio (ARR) and its sampling variance
+#   m_high, m_low   = mean trait value at the higher and lower acclimation temperatures
+#   sd_high, sd_low = standard deviation at the higher and lower acclimation temperatures
+#   n_high, n_low   = sample size at the higher and lower acclimation temperatures
+#   t_high, t_low   = the higher and lower acclimation temperatures
+
+arr <- function(m_high, m_low, sd_high, sd_low, n_high, n_low, t_high, t_low) {
+
+  # Difference in acclimation temperature
+  t_diff <- t_high - t_low
+
+  # Effect size: change in the trait per 1 °C of acclimation
+  ARR <- (m_high - m_low) / t_diff
+
+  # Sampling variance
+  V_ARR <- (1 / t_diff)^2 * (sd_high^2 / n_high + sd_low^2 / n_low)
+
+  # Return both as a data frame with two columns
+  data.frame(ARR, V_ARR)
+}
+```
+
+### Calculating $ARR$ and its sampling variance
+
+Using the `arr()` function above, we can now calculate the acclimation response ratio (ARR). Given that @Pottier2021 were interested in comparing the sexes, they calculated the difference in ARR between males and females. To simplify things here, we'll just focus on estimating the ARR for a single sex: females. As such, we'll calculate our ARR effect size and sampling variance, and then subset the data for females.
+
+```{r}
+#| label: arr-calc
+
+# Calculate ARR and its sampling variance for every row
+arr_es <- arr(m_high  = asr_dat$mean_high,     m_low  = asr_dat$mean_low,
+              sd_high = asr_dat$sd_high,       sd_low = asr_dat$sd_low,
+              n_high  = asr_dat$n_high_adj,    n_low  = asr_dat$n_low_adj,
+              t_high  = asr_dat$acc_temp_high, t_low  = asr_dat$acc_temp_low)
+
+# Add the two new columns to the data
+asr_dat <- cbind(asr_dat, arr_es)
+
+# Keep only the effect sizes for females
+asr_dat <- asr_dat %>%
+  filter(sex == "female")
+```
+
+### Fitting a multilevel meta-analytic model in `metafor`
+
+Our data are now ready for analysis! We will use the `rma.mv()` function in `metafor` to fit our first multilevel meta-analytic model. The model takes ARR as the response variable (`yi`) and accounts for its sampling variance (`V = V_ARR`). We are also going to estimate a random-effect variance for species, studies and effect sizes (within studies), to control for non-independence and to understand the sources of effect size variability. These are all given in the `random` argument of `rma.mv()`, which takes a list of all the random effects.
+
+You will notice two additional arguments:
+
+* The first, `dfs`, sets how the degrees of freedom are calculated for the inferential tests in the model. `dfs = "contain"` calculates the degrees of freedom based on the lowest clustering level minus 1 (in this case, study). Simulations have shown that this is a more robust way to protect against Type I errors [@Nakagawa2021].
+
+* The second argument, `test`, specifies the test statistic used. `metafor` defaults to *z* values based on the standard normal distribution; however, simulations have shown [@Pappalardo2021], and it has been recommended [@Rosenberg2013b], that the *t*-distribution be used because sample sizes are often small and the true variance of the test is being estimated.
+
+```{r}
+#| label: arr-mlma
+
+# Multilevel meta-analytic model
+MLMA <- rma.mv(yi = ARR,                       # effect sizes
+               V = V_ARR,                      # sampling variances
+               method = "REML",
+               random = list(~ 1 | species_ID, # among-species random effect
+                             ~ 1 | study_ID,   # among-study random effect
+                             ~ 1 | es_ID),     # within-study (effect size) random effect
+               dfs = "contain",
+               test = "t",
+               data = asr_dat)
+
+summary(MLMA)
+```
+
+#### What does the model output tell us?
+
+::: {.panel-tabset}
+
+## Task
+
+>**What is the overall mean estimate of the model, and how much heterogeneity exists?**
+
+<br>
+
+## Answer
+
+>The model estimates an **overall meta-analytic mean of `r round(MLMA$b[1], 3)`, with a 95% confidence interval of `r round(MLMA$ci.lb, 3)` to `r round(MLMA$ci.ub, 3)`**. **In other words, for each 1 $^{\circ}$C increase in acclimation temperature, female heat tolerance increases by an average of `r round(MLMA$b[1], 2)` $^{\circ}$C**.
+
+<br>
+
+>We can also see that there's a significant amount of heterogeneity among our effect size estimates, as the *Q*-test is significant. Judging by the variance components of the model, some of this heterogeneity is driven by variation among species, among studies and within studies. We'll explore how to dissect and discuss this heterogeneity on the [Heterogeneity](heterogeneity.qmd) page.
+
+:::
+
+<br>
+
+:::
+
+# Self-learning activity
+
+1. Refit `mod_ml` with `method = "ML"` instead of `"REML"`. Do the estimates change? (REML is preferred for estimating variance components; ML is needed when comparing models with different fixed effects using AIC.)
+2. Add a third random effect for `species` (`~ 1 | species`). How much variance is attributed to species? What happens to the study-level variance?
+3. Using `weights(mod_re)` and `weights(mod_ml)`, which model gives more weight to the study that contributes the most effect sizes?
+
+::: {.callout-tip collapse="true"}
+## Answers
+
+```{r}
+#| label: self-learning-answers
+
+# 1. Refit the multilevel model with ML
+mod_ml_ML <- rma.mv(yi = yi,
+                    V = vi,
+                    random = list(~ 1 | study_ID,
+                                  ~ 1 | es_ID),
+                    method = "ML",
+                    test = "t",
+                    dfs = "contain",
+                    data = wu_met)
+
+# Compare the overall means and variance components from REML and ML
+mod_ml$b[1]
+mod_ml_ML$b[1]
+mod_ml$sigma2
+mod_ml_ML$sigma2
+
+# 2. Add species as a third random effect
+mod_ml_sp <- rma.mv(yi = yi,
+                    V = vi,
+                    random = list(~ 1 | species,
+                                  ~ 1 | study_ID,
+                                  ~ 1 | es_ID),
+                    test = "t",
+                    dfs = "contain",
+                    data = wu_met)
+
+# Variance components: species, study, effect size
+round(mod_ml_sp$sigma2, 4)
+
+# 3. Find the study that contributed the most effect sizes
+study_counts <- wu_met %>%
+  count(study_ID, sort = TRUE)   # number of rows per study, largest first
+
+top_study <- study_counts$study_ID[1]
+top_study
+
+# weights() gives each effect size's weight as a % of the total weight.
+# Add up the weights of the rows that belong to top_study.
+in_top_study <- wu_met$study_ID == top_study
+
+sum(weights(mod_re)[in_top_study])   # random-effects model
+sum(weights(mod_ml)[in_top_study])   # multilevel model
+```
+
+1. The overall mean barely changes, but the variance components are slightly smaller with ML, because ML does not account for the degrees of freedom used to estimate the mean.
+2. Species and study effects are partly confounded (most studies use a single species), so variance is redistributed between the two levels; the overall mean changes little.
+3. The study with the most effect sizes (study `r top_study`, with `r study_counts$n[1]` effect sizes) receives `r round(sum(weights(mod_re)[in_top_study]), 1)`% of the total weight in the random-effects model and `r round(sum(weights(mod_ml)[in_top_study]), 1)`% in the multilevel model. The multilevel model treats effect sizes from the same study as correlated (they share the same study effect), so extra effect sizes from one study add less independent information than the same number of new studies would. How much this changes a study's total weight depends on how large the among-study variance is relative to the within-study variance; here, the two are similar and the difference is small.
+:::
+
+# Writing it up
+
+Here is an example write up for the `mod_ml` multilevel meta-analytic model output with between-study and within-study random effects.
+
+::: {.writeup}
+Because many studies contributed multiple effect sizes, we fitted a multilevel meta-analytic model with random effects for study and effect size identity using the `rma.mv` function in metafor v`r packageVersion("metafor")` [@Viechtbauer2010] with restricted maximum likelihood. Overall, `r if (mod_ml$pval < 0.05) 'metabolic traits were significantly correlated with movement behaviour' else 'the correlation between metabolic traits and movement behaviour did not differ significantly from zero'` (*Zr* = `r sprintf("%.3f", mod_ml$b[1])`, 95% CI `r sprintf("%.3f", mod_ml$ci.lb)` to `r sprintf("%.3f", mod_ml$ci.ub)`; *t*~`r mod_ml$ddf`~ = `r sprintf("%.2f", mod_ml$zval)`, *p* `r fmt_p(mod_ml$pval)`; *k* = `r mod_ml$k` effect sizes from `r length(unique(wu_met$study_ID))` studies), equivalent to *r* = `r sprintf("%.2f", tanh(mod_ml$b[1]))`.
+:::
+
+# References
+
+<div id="refs"></div>
+
+<br>

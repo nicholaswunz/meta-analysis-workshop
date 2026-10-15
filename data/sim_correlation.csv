@@ -1,0 +1,51 @@
+study_ID,study_year,taxa,species,trait,sex,body_size,comparison_ID,r,sample_size
+1,1994,Mammal,Rattus_norvegicus,Endurance,male,279.05,1,0.68,31
+1,1994,Mammal,Rattus_norvegicus,Activity,male,279.05,1,0.678,31
+2,2003,Fish,Danio_rerio,Sprint speed,female,0.45,2,0.36,63
+2,2003,Fish,Danio_rerio,Exploration,female,0.45,2,0.397,63
+2,2003,Fish,Danio_rerio,Activity,female,0.45,2,0.41,63
+3,2024,Reptile,Anolis_sagrei,Endurance,female,3.96,3,0.272,24
+3,2024,Reptile,Anolis_sagrei,Activity,female,3.96,3,-0.31,24
+3,2024,Reptile,Anolis_sagrei,Sprint speed,female,3.96,3,0.413,24
+3,2024,Reptile,Anolis_sagrei,Endurance,male,4.16,4,0.379,25
+3,2024,Reptile,Anolis_sagrei,Sprint speed,male,4.16,4,0.146,25
+3,2024,Reptile,Anolis_sagrei,Exploration,male,4.16,4,0.488,25
+4,2019,Bird,Passer_domesticus,Activity,male,23.94,5,-0.367,14
+4,2019,Bird,Passer_domesticus,Sprint speed,male,23.94,5,-0.128,14
+5,2017,Amphibian,Rhinella_marina,Sprint speed,female,165.21,6,0.187,50
+6,2018,Mammal,Mus_musculus,Activity,female,23.01,7,-0.099,24
+6,2018,Mammal,Mus_musculus,Endurance,female,23.01,7,0.586,24
+7,2013,Bird,Taeniopygia_guttata,Activity,male,9.48,8,0.417,9
+7,2013,Bird,Taeniopygia_guttata,Sprint speed,male,9.48,8,0.541,9
+8,1999,Fish,Oncorhynchus_mykiss,Endurance,female,461.84,9,0.251,48
+8,1999,Fish,Oncorhynchus_mykiss,Sprint speed,female,461.84,9,0.341,48
+9,2010,Reptile,Anolis_sagrei,Activity,female,4.46,10,0.453,50
+9,2010,Reptile,Anolis_sagrei,Exploration,male,3.69,11,0.408,53
+10,2013,Amphibian,Rana_temporaria,Exploration,male,23.27,12,0.212,18
+10,2013,Amphibian,Rana_temporaria,Endurance,male,23.27,12,0.436,18
+11,2010,Bird,Gallus_gallus,Activity,female,1667.71,13,0.15,11
+11,2010,Bird,Gallus_gallus,Exploration,female,1667.71,13,0.592,11
+12,2004,Fish,Oncorhynchus_mykiss,Sprint speed,female,508.65,14,0.754,15
+12,2004,Fish,Oncorhynchus_mykiss,Activity,male,525.85,15,0.793,16
+13,1992,Mammal,Rattus_norvegicus,Activity,female,290.06,16,0.666,30
+13,1992,Mammal,Rattus_norvegicus,Endurance,male,408.6,17,0.604,34
+14,2016,Amphibian,Rhinella_marina,Endurance,female,128.86,18,0.207,61
+14,2016,Amphibian,Rhinella_marina,Exploration,female,128.86,18,0.356,61
+14,2016,Amphibian,Rhinella_marina,Activity,male,118.7,19,0.297,60
+14,2016,Amphibian,Rhinella_marina,Sprint speed,male,118.7,19,0.411,60
+15,1994,Reptile,Pogona_vitticeps,Sprint speed,female,378.56,20,0.11,21
+16,2011,Bird,Taeniopygia_guttata,Activity,male,11.92,21,0.44,26
+16,2011,Bird,Taeniopygia_guttata,Endurance,male,11.92,21,0.022,26
+17,1991,Bird,Taeniopygia_guttata,Sprint speed,female,13.41,22,0.569,19
+17,1991,Bird,Taeniopygia_guttata,Exploration,female,13.41,22,0.378,19
+17,1991,Bird,Taeniopygia_guttata,Endurance,female,13.41,22,0.251,19
+18,2015,Fish,Gasterosteus_aculeatus,Endurance,female,1.23,23,-0.005,111
+19,1994,Mammal,Rattus_norvegicus,Sprint speed,female,270.58,24,0.621,49
+19,1994,Mammal,Rattus_norvegicus,Endurance,female,270.58,24,0.279,49
+19,1994,Mammal,Rattus_norvegicus,Exploration,female,270.58,24,0.759,49
+19,1994,Mammal,Rattus_norvegicus,Endurance,male,259.04,25,0.619,51
+19,1994,Mammal,Rattus_norvegicus,Sprint speed,male,259.04,25,0.404,51
+19,1994,Mammal,Rattus_norvegicus,Exploration,male,259.04,25,0.625,51
+20,1996,Fish,Danio_rerio,Endurance,female,0.55,26,0.462,26
+21,2021,Amphibian,Xenopus_laevis,Exploration,male,67.52,27,0.695,7
+22,2006,Fish,Danio_rerio,Exploration,female,0.4,28,-0.206,26

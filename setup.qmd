@@ -1,0 +1,86 @@
+---
+title: "Setup before workshop"
+---
+
+# Software
+
+- **R** ≥ 4.3 – <https://cran.r-project.org>
+- **RStudio** or **Positron** – <https://posit.co/download/>
+- **Excel**, LibreOffice Calc or Google Sheets for hand calculations.
+
+# Install packages
+
+Run this once to install all packages for the workshop:
+
+```{r}
+#| eval: false
+# Core packages (CRAN)
+install.packages(c(
+  "pacman",          # p_load(): loads packages (and installs any that are missing)
+  "tidyverse",       # dplyr, tidyr, ggplot2, readr, purrr ...
+  "metafor",         # meta-analysis models (rma, rma.mv, escalc, vcalc ...)
+  "clubSandwich",    # cluster-robust variance estimation
+  "ape",             # reading and manipulating phylogenies
+  "rotl",            # phylogenies from the Open Tree of Life
+  "corrplot",        # plotting correlation matrices
+  "patchwork",       # combining ggplots
+  "readxl",          # reading Excel files back into R
+  "here",            # project-relative file paths
+  "sp",              # great-circle distances for spatial models (metafor dist = "gcd")
+  "downlit", "xml2", # link functions in code chunks to their help pages
+  "remotes"          # installing packages from GitHub
+))
+
+# Packages from GitHub
+# orchaRd: orchard plots, I2 and R2 for multilevel models
+remotes::install_github("daniel1noble/orchaRd", force = TRUE)
+
+# metaAidR: make_VCV_matrix() for shared-control (co)variance matrices
+remotes::install_github("daniel1noble/metaAidR")
+```
+
+## Optional: Bayesian models with `brms`
+
+Every model in this workshop is fitted with `metafor`, but some pages also show the equivalent `brms` code, and all of it is collected on the [brms companion](resources/brms-companion.qmd) page. `brms` needs a C++ toolchain and Stan. If you want to try it:
+
+```{r}
+#| eval: false
+install.packages("brms")
+# Recommended fast backend
+install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
+cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+cmdstanr::install_cmdstan()
+```
+
+::: {.callout-note}
+## Do I need brms?
+**No**. 
+
+The `brms` chunks are provided as an option for those who want a Bayesian workflow (e.g., to put priors on variance components or to fit location-scale models with continuous scale moderators). Those chunks are not run when this website is built (`eval: false`) because fitting Stan models takes minutes rather than seconds.
+:::
+
+# Check that everything works
+
+```{r}
+#| label: check-install
+# Load the main packages (pacman installs any that are missing)
+pacman::p_load(tidyverse, metafor, orchaRd, ape)
+
+# A tiny meta-analysis with a dataset that comes with metafor (dat.bcg)
+dat <- escalc(measure = "RR",     # log risk ratio
+              ai = tpos,          # vaccinated, tuberculosis positive
+              bi = tneg,          # vaccinated, tuberculosis negative
+              ci = cpos,          # control, tuberculosis positive
+              di = cneg,          # control, tuberculosis negative
+              data = dat.bcg)
+
+# Random-effects meta-analysis
+rma(yi = yi, vi = vi, data = dat)
+```
+
+If you see a 'Random-Effects Model (k = 13; tau^2 estimator: REML)' printout, you are ready.
+
+# Data
+
+The real datasets used on the lecture pages are downloaded from the authors' public repositories (GitHub and OSF) with `read.csv()`, so you need an internet connection. Local copies are also included in the `data/` folder (see the [data dictionary](resources/data-dictionary.qmd)); if you are offline, replace the URL with, for example, `here::here("data", "wu_seebacher_2022_correlation.csv")`. The simulated datasets for the hands-on activities are read from the `data/` folder.
+

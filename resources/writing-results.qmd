@@ -1,0 +1,47 @@
+---
+title: "Writing up a meta-analysis"
+subtitle: "A reporting cheat-sheet with templates"
+engine: markdown
+---
+
+Meta-analyses in ecology, evolution and physiology should follow **PRISMA-EcoEvo** [@ODea2021]. This page collects the reporting templates used throughout the workshop. Replace the bracketed values with your own (in Quarto, use inline R code such as `` `r sprintf('%.2f', mod$b[1])` `` so that numbers update automatically when the model changes).
+
+## Methods
+
+::: {.writeup}
+**Literature search.** We searched [databases] on [date] using the search string in Supplementary Table S1, built from population, exposure and outcome terms (PECOST framework; Foo et al. 2021). [n] records were screened by title and abstract and [n] full texts were assessed against pre-registered inclusion criteria; [n] studies ([k] effect sizes) were included (PRISMA diagram, Fig. 1).
+
+**Effect sizes.** We quantified [effect] as the [log response ratio / Fisher's Zr / Hedges' g / lnRR~Q10~], with [treatment] in the numerator so that positive values indicate [direction]. Sampling variances were calculated following [reference]. Standard errors and confidence intervals were converted to standard deviations before calculation.
+
+**Models.** We fitted multilevel meta-analytic models with random effects for study, effect-size identity, species and phylogeny using `rma.mv` in metafor v[x] (Viechtbauer 2010) in R v[x], estimated with REML and *t*-tests with containment degrees of freedom. The phylogenetic correlation matrix was derived from [source tree] assuming Brownian motion. Sampling covariances among effect sizes sharing a control group were included in the sampling variance–covariance matrix. Heterogeneity was quantified with Q, I² (total and per random effect; Nakagawa & Santos 2012) and 95% prediction intervals. Moderators ([list]) were tested in multilevel meta-regressions; continuous moderators were mean-centred. Publication bias was assessed with multilevel meta-regressions including √(1/ñ) and centred publication year (Nakagawa et al. 2022). Results were visualised with orchard plots (orchaRd v[x]; Nakagawa et al. 2023).
+:::
+
+## Results – checklist
+
+| Item | Example |
+|---|---|
+| Sample sizes | *k* = 311 effect sizes, 63 studies, 48 species |
+| Overall mean on analysed scale | lnRR = 0.25, 95% CI 0.08 to 0.42 |
+| Back-transformed | = 28% increase; *r* = tanh(Zr); Q~10~ = exp(lnRR~Q10~) |
+| Test | *t*~12~ = 3.22, *p* = 0.007 |
+| Heterogeneity | Q~49~ = 297, *p* < 0.001; I²~total~ = 88% (phylogeny 35%, ...) |
+| Prediction interval | −21% to 109% |
+| Moderators | omnibus *F*-test; each slope/contrast with 95% CI; marginal *R*² |
+| Publication bias | small-study slope, time-lag slope, bias-adjusted estimate; funnel plot |
+| Sensitivity | leave-one-out, alternative V (ρ), alternative trees, robust variance estimation |
+| Figures | orchard plots, bubble plots, funnel plots |
+
+## Results – template
+
+::: {.writeup}
+Across [k] effect sizes from [n] studies and [n] species, [exposure] [increased/decreased] [outcome] by [x]% on average (lnRR = [est], 95% CI [lb] to [ub]; *t*~[df]~ = [t], *p* = [p]; Fig. 2). Heterogeneity was [high] (Q~[df]~ = [Q], *p* [p]; I²~total~ = [x]%), with [x]% attributable to phylogeny, [x]% to species, [x]% to studies and [x]% to effect sizes within studies; the 95% prediction interval ranged from [x]% to [x]%. [Moderator] explained a significant amount of heterogeneity (*F*~[df1],[df2]~ = [F], *p* = [p]; marginal *R*² = [x]%): [describe direction and magnitude with CI] (Fig. 3). There was [evidence / no evidence] of small-study effects (slope = [b], 95% CI [lb] to [ub]) and [evidence / no evidence] of a decline in effect sizes over time (slope = [b] per year, 95% CI [lb] to [ub]); the bias-adjusted mean was [est] (95% CI [lb] to [ub]).
+:::
+
+## Common mistakes to avoid
+
+- Reporting only *p*-values – always give estimates and CIs on an interpretable scale.
+- Reporting I² without τ²/σ² and a prediction interval.
+- Interpreting the intercept of a model with uncentred continuous moderators.
+- Reporting an intercept-free model's omnibus test as a test of group differences.
+- Treating a bias-corrected intercept as 'the true effect' rather than a sensitivity analysis.
+- Forgetting to report software and package versions (`sessionInfo()`).

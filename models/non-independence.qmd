@@ -1,0 +1,541 @@
+---
+title: "Non-independence: shared controls and phylogeny"
+---
+
+```{r}
+#| label: setup
+
+# Load packages
+pacman::p_load(tidyverse,   # data wrangling and plots
+               metafor,     # meta-analysis
+               orchaRd,     # I2 and orchard plots
+               metaAidR,    # make_VCV_matrix() for shared controls
+               corrplot,    # plot correlation matrices
+               ape,         # phylogenetic trees
+               rotl)        # get trees from the Open Tree of Life
+
+# Workshop plotting theme and colours
+source(here::here("R", "theme_workshop.R"))
+```
+
+# Sources of non-independence
+
+We have already introduced the power of [multilevel meta-analytic models](fixed-random-multilevel.qmd) for dealing with non-independence, such as shared species and studies [@Noble2017; @NakagawaSantos2012; @HadfieldNaka2010], but meta-analyses often contain even more complex forms of non-independence.
+
+We might have many effect size estimates from a single study because many traits are measured on the **same sample of organisms**, or many treatments are applied and we can create an **effect size with some common control** [@Noble2017]. This adds complexity to the data set and also results in special types of non-independence that are somewhat unique to meta-analysis -- especially when using contrast-based effect sizes like Hedges' *g*, log response ratios, log odds ratios, etc. [@Noble2017].
+
+In this tutorial, we'll overview some of these unique forms of non-independence and discuss some of the ways they can be dealt with. Often there are no simple solutions, because the information collected to derive effect sizes often lacks important details that would allow some forms of dependence to be dealt with. Thankfully, many meta-analysts have thought about these problems for some time, and there are solutions that work reasonably well [@GleserOlkin2009; @Lajeunesse2011; @Pustejovsky2021; @Tipton2013; @Hedges2010; @Hedges2019]. 
+
+## The many forms of dependence in meta-analysis
+
+Let's briefly overview why non-independence can be an issue and why simple multilevel meta-analytic models do not always deal with the problem sufficiently well. Recall our multilevel meta-analytic (MLMA) model from the [previous tutorial](fixed-random-multilevel.qmd).
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{j} &\sim N(0, \tau^2) \\
+spp_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+We hid some important notation to avoid drawing attention to it initially. The notation we neglected to mention is now included below:
+
+$$
+\begin{aligned}
+m_{i} &\sim N(0, v_{i}\textbf{I}) \\
+s_{j} &\sim N(0, \tau^2\textbf{I}) \\
+spp_{k} &\sim N(0, \sigma_{k}^2\textbf{I}) \\
+e_{i} &\sim N(0, \sigma_{e}^2\textbf{I})
+\end{aligned}
+$$
+
+You'll notice that we added in $\bf{I}$, but what is $\bf{I}$? $\bf{I}$ is called the identity matrix. It is a matrix that has rows and columns equal to the number of effect size values (if at the effect level) or the number of species or studies (if at the study or species level) in the data set. The identity matrix contains 1s on the diagonal and 0s in the off-diagonals. For a data set with 3 effect size estimates the identity matrix looks like this:
+
+$$
+\bf{I} = \begin{bmatrix}
+1 & 0 & 0 \\
+0 & 1 & 0 \\
+0 & 0 & 1
+\end{bmatrix}
+$$
+
+#### Thinking about matrices and variances!
+
+::: {.panel-tabset}
+
+## Task
+
+>**What is the significance of multiplying the $\bf{I}$ matrix by the variance for each random effect above?**
+
+<br>
+
+## Answer
+
+>The short story is that we are making the assumption that each random effect added to a given effect size is drawn from an independent and identical distribution. To see why this is the case, think about what happens when we multiply $\sigma_{i}^2$ by this matrix. Along the diagonal, we get the exact same variance estimate for every single effect size (or for effect sizes that share a cluster). This tells us that they are sampled from a distribution that has the same mean (0) and variance ($\sigma_{i}^2$) (i.e., are sampled from the same distribution). 
+
+<br>
+
+>If, however, we multiply the off-diagonals by the variance, we get zero. The fact that these off-diagonals are 0 tells us straight away that all the random effects being sampled are independent of one another; otherwise, the off-diagonals would be non-zero (i.e., there would be a covariance, and the correlation matrix would have a correlation above 0). This seems sensible. All effect size estimates from the same study will have the same 'effect' added to the estimate. This indicates that these effects should be more similar to each other by virtue of them being from the same study (@fig-fig1 B, from @Noble2017). This does, in some sense, deal with non-independence, but not completely!
+
+:::
+
+<br>
+
+
+## Complex forms of non-independence
+
+Our assumption about effects from the same study being independent would likely be wrong if, for example, we have effect sizes that are measured on different traits of the same animals that vary in their relationship with each other (i.e., some traits are more strongly correlated than others). The same applies if our effect size statistics were collected at different times or spatial locations that vary in the extent to which they are correlated with each other. In fact, species themselves vary to different degrees based on how long ago they shared a common ancestor. This is why we include evolutionary relationships among species in our meta-analytic models! [@HadfieldNaka2010; @Chamberlain2012; @NakagawaSantos2012] (@fig-fig1 A, from @Noble2017). In these cases, we need to properly model the correlation among effect size values induced by these processes.
+
+
+![Different forms of non-independence described by @Noble2017. A) Effect size estimates could be correlated as a result of shared evolutionary history; B) they could be correlated because they come from the same study with the same types of methodology applied. Effect sizes could also be correlated because the effects themselves are correlated to differing degrees because of spatial or temporal correlations (E, F), because their sampling errors are correlated (D), or a combination of both (C).](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/nonIn.png){#fig-fig1 fig-align="center"}
+
+But, wait, there's more. In fact, things can get very complicated, as outlined by @Noble2017! (See @fig-fig1). If we have used the same data to calculate multiple effect size values, then we are also inducing a correlation among their sampling errors [@GleserOlkin2009; @Noble2017; @Lajeunesse2011; @Hedges2019]. 
+
+That could be a serious problem because the inverse sampling errors are what we are using as weights in our analysis. If there are correlations among sampling errors then we need to account for this in our sampling variance matrix. We can do this by also modifying our sampling error matrix:
+
+$$
+m_{i} \sim N(0, \textbf{M})
+$$
+
+The new sampling variance matrix, $\textbf{M}$, now has the sampling variances along the diagonal, which we know because we can calculate these. But how do we know what covariance between the sampling errors to put in the off-diagonals of this $\textbf{M}$ matrix? Luckily, there are some approximations for us that we can use to construct the entire $\textbf{M}$ sampling (co)variance matrix [@GleserOlkin2009; @Lajeunesse2011; @Hedges2019]. 
+
+
+## Why do we want to control for non-independence?
+
+You might be thinking, so what? Yes, we have all these sources of non-independence, but who cares? Why is it important that we seriously consider the dependency? There are a few reasons:
+
+1. We want to make sure we get the 'weight' matrix correct so that we get a good estimate of the overall meta-analytic mean.
+2. Ignoring the dependency structure will result in much narrower confidence intervals, giving us the false impression that we have much greater confidence in the mean estimate than we actually have.
+3. We are more likely to make Type I errors. Narrower standard errors result in larger test statistics, and this, in combination with over-inflated degrees of freedom, will tell us our results are significant when in fact they are not.
+
+
+| Source | Example | How to model it |
+|---|---|---|
+| Same study / lab | several traits measured in one experiment | random effect `~ 1 \| study_ID` |
+| Same individuals | metabolic rate correlated with both sprint speed and endurance in the same animals | correlated **sampling errors**: off-diagonals of **V** (`vcalc()`) |
+| **Shared control** | two warm treatments compared with the same control group | correlated **sampling errors**: off-diagonals of **V** |
+| Same species | several studies of *Trachemys scripta* | random effect `~ 1 \| species` |
+| **Phylogeny** | turtles more similar to each other than to snakes | random effect with known correlation matrix **A**: `R = list(phylo = A)` |
+
+There are two kinds of non-independence: in the **true effects** (handled with random effects) and in the **sampling errors** (handled with the **V** matrix). Most real datasets need both.
+
+In this tutorial, we will deal with two common, but complex, forms of non-independence in ecological and evolutionary studies: 1) shared controls; and 2) phylogeny.
+
+::: {.panel-tabset}
+
+# Shared controls
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/raynal.png)
+
+As an example of how to deal with **shared-control non-independence** that affects the sampling (co)variance matrix ($\textbf{M}$), we'll turn to a study by @Raynal2022 (<https://doi.org/10.1242/jeb.243369>). @Raynal2022 were interested in comparing how fluctuating versus constant developmental temperatures (i.e., egg incubation temperatures) affect suites of traits.
+
+For the purpose of this exercise, we will focus on a single trait with the most data, offspring body mass. In other words, we are interested in comparing whether reptiles from fluctuating incubation conditions differ in mass at hatching from reptiles kept at constant incubation conditions. To do this, @Raynal2022 used the log response ratio (*lnRR*) to estimate the magnitude and direction of mass difference between constant and fluctuating temperature treatments. 
+
+Importantly, many studies contained multiple fluctuating temperature treatments. Some studies fluctuated temperatures by $\pm$ 2$^{\circ}$C, whereas other treatments might have fluctuated temperatures by $\pm$ 8$^{\circ}$C. In this type of study, the **constant incubation temperature treatment can be compared with both fluctuating treatments to create two separate effect size values (like in @fig-fig1 B)**. However, as noted above, this induces a correlation between their sampling errors because the constant treatment is used twice. We'll show you how we can deal with this very common type of situation. 
+
+
+### Loading the data and calculating lnRR
+
+We'll first load the data that we need for the analysis. (The `metaAidR` package was loaded at the top of the page; see [Setup](../setup.qmd) for how to install it from GitHub.)
+
+```{r}
+#| label: datapack
+#| echo: true
+#| message: false
+#| warning: false
+#| output: false
+
+# Download the data
+mass_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/Mass.data.csv")
+```
+
+We can now calculate the log response ratio (*lnRR*) from the two treatments within the data:
+
+```{r}
+#| label: calc-lnrr
+#| echo: true
+
+# Calculate the log response ratio (measure = "ROM")
+#   group 1 = fluctuating temperature treatment, group 2 = constant (control)
+#   escalc() adds two columns: yi (the effect size) and vi (its sampling variance)
+mass_data <- escalc(measure = "ROM",
+                    m1i = treat_mean,  sd1i = treat_error,  n1i = treat_N,
+                    m2i = control_mean, sd2i = control_error, n2i = control_N,
+                    data = mass_data)
+
+# Give every row (effect size) its own ID: 1, 2, ..., k.
+# make_VCV_matrix() uses it to label the rows and columns of the M matrix.
+mass_data$obs <- 1:nrow(mass_data)
+```
+
+### Creating the $\textbf{M}$ matrix to deal with shared controls
+
+When setting up the data, it is important that there is a column indicating which rows share a common control condition. Rows that have the same value within this column indicate which effects need to have a covariance calculated for the off-diagonal element of the $\textbf{M}$ matrix. In this data set the `comparison_ID` column represents this indicator. 
+
+Once we have a column indicating which effects share a common control, we want to calculate the covariance between the sampling errors for these effects. To do this, we can make use of covariance equations for various effect sizes [many large-sample approximations for these can be found in @GleserOlkin2009; and @Lajeunesse2011]. For the log response ratio, @Lajeunesse2011 provides this equation. We won't go over the details, other than to say that it exists and that some of these formulas are already built into the `make_VCV_matrix` function in the [`metaAidR`](https://github.com/daniel1noble/metaAidR) package. 
+
+```{r}
+#| label: calc-vcv-matrix
+#| echo: true
+
+# Build the M matrix: sampling variances on the diagonal, and
+# covariances between effect sizes that share a control in the off-diagonals
+M <- make_VCV_matrix(data = mass_data,
+                     V = "vi",                    # column with the sampling variances
+                     cluster = "comparison_ID",   # rows with the same value share a control
+                     m = "control_mean",          # control group mean ...
+                     sd = "control_error",        # ... standard deviation ...
+                     n = "control_N",             # ... and sample size
+                     type = "vcv",                # return a (co)variance matrix
+                     vcal = "ROM",                # covariance formula for lnRR
+                     obs = "obs")                 # effect size ID
+
+# Look at the top-left corner of the matrix
+round(M[1:6, 1:6], 4)
+```
+
+We can see the block structure from the shared controls in the data using `corrplot` (@fig-corrplot). While we present the correlation matrix, the actual $\textbf{M}$ matrix contains the covariances in the off-diagonals. This uses @Lajeunesse2011's equation 8, which shows that the covariance is simply the control variance part of the log response ratio sampling variance. 
+
+```{r}
+#| label: fig-corrplot
+#| fig-align: center
+#| fig-cap: "Correlation plot of the M matrix. The (co)variance matrix is converted to a correlation matrix and plotted. We can see the blocked structure in the matrix with off-diagonals indicating the effect sizes that share a common control. In this data there are not a huge number, but enough to see."
+#| echo: true
+
+# Convert the (co)variance matrix to a correlation matrix, then plot it
+M_cor <- cov2cor(M)
+
+corrplot(M_cor,
+         tl.cex = 0.6,    # size of the row and column labels
+         col = colorRampPalette(c("#1A2533", "white", "#e12744"))(200))   # workshop colours
+```
+
+### Including the $\textbf{M}$ matrix in our multilevel meta-analytic model
+
+Now that we have constructed the $\textbf{M}$ matrix, we are ready to fit our multilevel meta-analytic model. Note that @Raynal2022 included a phylogenetic correlation matrix in their model, but we'll save that for the next section and simplify the model. We'll control for study ID, species ID and estimate a residual (within-study) variance:
+
+```{r}
+#| label: mlma
+#| echo: true
+
+# Multilevel model with the M matrix as the sampling (co)variance matrix
+mlma <- rma.mv(yi = yi,
+               V = M,                             # the full M matrix, not just vi
+               random = list(~ 1 | paper_no,      # among-study random effect
+                             ~ 1 | Genus_species, # among-species random effect
+                             ~ 1 | data_ID),      # within-study (effect size) random effect
+               method = "REML",
+               test = "t",
+               dfs = "contain",
+               data = mass_data)
+
+summary(mlma)
+```
+
+As you can see in the model, the `V` argument in `rma.mv()` takes the $\textbf{M}$ matrix directly. This will account for the shared-control usage in the data. This model is a little different from the one actually fit in @Raynal2022 because it does not include phylogeny, but it gives us essentially the same result. 
+
+#### What does the model output tell us?
+
+::: {.panel-tabset}
+
+## Task
+
+>**What is the overall mean estimate and variance, and what does it mean in the context of fluctuating temperature on body mass?** 
+
+<br>
+
+## Answer
+
+>In essence, this model tells us that there is, on average, a **`r round(abs(1 - exp(mlma$b[1])) * 100, 1)`% `r ifelse(mlma$b[1] < 0, 'decrease', 'increase')`** in mass in the fluctuating temperature treatment compared with the constant (control) treatment, which is a pretty trivial difference! We can also see that the **95% confidence interval (`r round(mlma$ci.lb, 3)` to `r round(mlma$ci.ub, 3)`) `r ifelse(mlma$pval < 0.05, 'excludes zero, indicating that the estimate differs significantly from zero', 'overlaps zero, indicating that the estimate does not differ significantly from zero')`**. Having said that, there is a lot of heterogeneity in effects across species and studies included in the analysis, suggesting that the effect might really depend on the study.
+
+:::
+
+<br>
+
+
+---
+
+# Phylogenetic non-independence
+
+Meta-analyses in comparative physiology almost always synthesise effects across a multitude of species [@Hadfield2010; @NakagawaSantos2012; @Chamberlain2012]. Species share an evolutionary history which is described by a phylogeny [@Chamberlain2012; @Lajeunesse2009; @Gurevitch1999]. As a result, the samples (and the effect sizes obtained from these samples) **are not independent which violates the independence assumption underlying conventional meta-analytic models**. For example, the standard [fixed- and random-effects models](fixed-random-multilevel.qmd) often used for ecological meta-analyses [@NakagawaSantos2012; @Lajeunesse2009] assume independence among the effect sizes and therefore do not account for phylogeny [@Chamberlain2012; @Noble2017]. 
+
+Including a 'species-level' random effect will not deal with this type of non-independence because the 'effects' are themselves correlated based on the amount of shared evolutionary history between two species. 
+
+Recent simulations by @Cinar2021 emphasise the importance of modelling phylogeny in meta-analytic models. Even when there is little phylogenetic signal in the data, it will not compromise the analysis to have a phylogeny included, but it will **protect you against Type I errors**. In this tutorial, we expand on our [multilevel meta-analytic models](fixed-random-multilevel.qmd) to account for phylogenetic relatedness. Part of the challenge in controlling for phylogeny in a meta-analysis is that the taxa included are often highly diverse and there is little resolution on the exact phylogenetic relationship among the taxa in question. Having said that, there are tools that do a fairly good job of delineating them, and we show here how to build a rough phylogeny that can be included.
+
+## Formal definition of the phylogenetic meta-analytic model
+
+[Recall](fixed-random-multilevel.qmd) the multilevel meta-analytic model we discussed previously:
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{j[i]} + spp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}\textbf{I}) \\
+s_{j} &\sim N(0, \tau^2\textbf{I}) \\
+spp_{k} &\sim N(0, \sigma_{k}^2\textbf{I}) \\
+e_{i} &\sim N(0, \sigma_{e}^2\textbf{I})
+\end{aligned}
+$$
+
+Here, $y_{i}$ is the *i*th effect size estimate and $m_{i}$ is the sampling error (deviation from $\mu$) for effect size *i*. $e_{i}$ is the effect-size-specific effect (within-study effect; that's a mouthful!) applied to each effect *i*. $s_{j[i]}$ is the study-specific effect, *j*, applied to the *i*th effect size, where *j* = 1,...,$N_{studies}$, and $spp_{k[i]}$ is the species-specific effect, *k*, applied to the *i*th effect size, where *k* = 1,...,$N_{species}$. As we discussed in the section on shared controls, $\textbf{I}$ denotes the fact that effect size estimates are independently and identically distributed.
+
+This model accounts for the fact that effect size values from the same study and species are clustered (i.e., non-independent) because they all share the same 'effect' sampled from the same distribution. However, in reality, this doesn't account for the fact that some species effects are more similar to each other than others because of the shared evolutionary history between species [@Hadfield2010; @Lajeunesse2009; @NakagawaSantos2012]. 
+
+To account for shared evolutionary history between species we need to modify the $\textbf{I}$ matrix to model the correlation between 'species effects'. This can be done by estimating a new random phylogenetic effect ($a_{k}$), and replacing the $\textbf{I}$ matrix with an $\textbf{A}$ matrix as follows:
+
+$$
+\begin{aligned}
+y_{i} &= \mu + s_{j[i]} + spp_{k[i]} + a_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}\textbf{I}) \\
+s_{j} &\sim N(0, \tau^2\textbf{I}) \\
+spp_{k} &\sim N(0, \sigma_{k}^2\textbf{I}) \\
+a_{k} &\sim N(0, \sigma_{a}^2\textbf{A}) \\
+e_{i} &\sim N(0, \sigma_{e}^2\textbf{I})
+\end{aligned}
+$$
+
+Here, $a_{k[i]}$ is a **phylogenetic effect** for the *k* species applied to effect size *i*. These effects are now sampled from a normal distribution (denoted by *N*) with a mean of 0 and a variance of $\sigma_{a}^2$, which is the phylogenetic variance. However, now $\textbf{A}$ is a $N_{species}$ by $N_{species}$ correlation matrix of distances between species extracted from a phylogenetic tree, which means that species effects will be correlated (off-diagonals will be non-zero) based on the distance from the root of the tree to the most recent common ancestor [@NakagawaSantos2012; @Hadfield2010; @Noble2017]. 
+
+You will notice that we have *two* species-level random effects in our model. We are 'trying' (and we may not succeed) to distinguish between species-specific effects driven by shared evolutionary history (i.e., $a_{k}$) and non-phylogenetic species-specific effects (i.e., $spp_{k}$), driven by, say, shared ecology. **It may not always be possible to estimate both effects in a single model**. It is worth keeping this in mind as these are data-hungry models and estimating these parameters will require a large sample size. Often, it is necessary to resort to some form of model selection or to use your *a priori* judgement about what species-specific effect is most important. 
+
+## Example
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/WuSeebacher.png)
+
+### Format raw data for analysis
+
+We will use the dispersal data set (Fisher's z-transformed correlation coefficient, *Zr*) from @WuSeebacher2022 (see the [Effect sizes](../foundations/effect-sizes.qmd) tutorial for background and the effect size calculation) to demonstrate the following analysis. First, load the raw data and add an effect size ID column (`es_ID`). Then, calculate the effect size as `Zr` and the sampling variance as `V_Zr`.
+
+```{r}
+#| label: raw-data
+
+# Download the data
+zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv")
+
+# Remove a column we don't need
+zr_data <- zr_data %>%
+  select(-dispersal_def)
+
+# Give every effect size (row) its own ID
+zr_data$es_ID <- 1:nrow(zr_data)
+
+# Make the OTL species names consistent: replace any underscores with spaces
+# (a few names were entered with an underscore when the database was curated)
+zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, "_", " ")
+
+# Calculate Zr and its sampling variance
+zr_data <- escalc(measure = "ZCOR",
+                  ri = corr_coeff,
+                  ni = sample_size,
+                  data = zr_data,
+                  var.names = c("Zr", "V_Zr"))
+```
+
+### Phylogenetic reconstruction
+
+We will now reconstruct the phylogeny for the species in the raw data set. There are different ways to obtain phylogenetic trees. You can extract trees as a `.nex` or `.tre` file from existing phylogeny databases or studies with such data available (see <https://vertlife.org/data/> for taxon-specific trees, for example), load them into *R* using the `ape` package, and prune the tree (keep only the species you have) to match the data set. See the `drop.tip()` function and this post by [Liam Revell](http://blog.phytools.org/2011/03/prune-tree-to-list-of-taxa.html) on pruning tree tips to match the species names in a data set.
+
+If you are comparing effect sizes from a broad phylogenetic range (e.g., including prokaryotes or plants), you can extract species names from the [Open Tree of Life](https://tree.opentreeoflife.org/opentree/argus/opentree13.4@ott93302) (OTL) data set using the `rotl` *R* package. Tutorials for the `rotl` *R* package can be found here: <https://cran.r-project.org/web/packages/rotl/vignettes/rotl.html>
+
+For the purpose of this tutorial, we will follow the second method. Notice that we have a separate column in the raw data set called `species_OTL`. This is because, to reconstruct the phylogeny, we need the names in the data set to match the OTL data set. The species names given in the papers (especially older papers) may not match the OTL names. Check that the names match before running the following code, or else it will not run successfully. This also applies to any phylogenetic trees extracted.
+
+#### IMPORTANT NOTE
+
+::: {.panel-tabset}
+
+## Errors in matching names
+
+> **What can we do if errors occur when matching taxa names in the phylogeny with those in the data set?**
+
+## Suggestions
+
+> Name matching errors come in different forms and flavours with the OTL. The easiest way to avoid most errors is to check that the **names in the raw data match the OTL database** each time you add a new species. OTL will also check for taxon synonyms – changes to taxon names. You can check for these and update your data set so the taxa match. This will address many name-matching errors down the track. We have included code to check which names are inconsistent, in case you missed some. The remaining errors come down to formatting, which you can see below. As an example with this data set, a few species names (three species) were formatted inconsistently, and an inconsistently formatted name such as "Gambusia affinis" can be matched to the wrong taxon in the OTL database (here, "Bambusia affinis"). Clearly, this is a different taxon. We can get around this by first replacing the underscores with spaces before matching the names (see the code above), and then adding the underscores back when matching the names to the tree (which has underscores).
+
+:::
+
+<br>
+
+### Build the tree and create a correlation matrix
+
+```{r}
+#| label: phylo
+#| warning: false
+#| message: false
+
+# 1. Match our species names to the Open Tree of Life (OTL) database
+species <- sort(unique(zr_data$species_OTL))   # list of unique species names
+taxa <- tnrs_match_names(names = species)      # look up each name in the OTL
+
+# Check for names that only matched approximately (should be none)
+taxa[taxa$approximate_match == TRUE, ]
+
+# The number of species in the data and in the matched list should be the same
+length(species)
+nrow(taxa)
+
+# 2. Download the part of the OTL tree that contains our species
+tree <- tol_induced_subtree(ott_ids = ott_id(taxa), label_format = "name")
+
+# 3. Check that the tree tip labels match the species names in the data
+#    (tree tip labels use underscores, so add them to our names first)
+species_list <- str_replace_all(species, " ", "_")
+setdiff(tree$tip.label, species_list)   # names in the tree but not in the data (should be none)
+
+# You can also plot the tree to check that the species are correct:
+# plot(tree, cex = 0.6, label.offset = 0.1, no.margin = TRUE)
+
+# 4. Prepare the tree for analysis
+set.seed(1)
+tree <- compute.brlen(tree, method = "Grafen", power = 1)   # add branch lengths
+tree <- multi2di(tree, random = TRUE)                       # randomly resolve polytomies
+
+# Note: a polytomy is an internal node with three or more descendant branches.
+# Trees from the OTL often have polytomies because of a lack of phylogenetic
+# information. multi2di() resolves them at random into a fully bifurcating tree.
+
+# Check the tree is ultrametric (all tips equally distant from the root)
+is.ultrametric(tree)
+
+# 5. Create the phylogenetic correlation matrix (A) for the analysis
+phylo_cor <- vcv(tree, corr = TRUE)
+```
+
+We can also have a look at the final tree:
+
+```{r}
+#| label: tree
+#| echo: true
+#| fig-align: center
+#| fig-height: 6
+#| fig-cap: "Phylogenetic tree generated for species in the Wu & Seebacher (2022) dataset."
+
+plot(tree, type = "phylogram", cex = 0.3)
+```
+
+### Run a phylogenetic multilevel meta-analysis of the overall effect
+
+Let's say we are interested in the **overall relationship** between physiology and movement (*Zr*). The following code runs a phylogenetic multilevel meta-analysis using the `rma.mv()` function. Building on the multilevel meta-analytic model from the [multilevel model tutorial](fixed-random-multilevel.qmd), we include random effects (the `random` argument) to account for non-independence: `es_ID` (effect size identity), `study_ID` (study identity), `species` (species identity) and `species_OTL` (species relatedness). The `R` argument allows the correlation matrix (here, `phylo_cor`) to be incorporated into the model; it is linked to the `~ 1 | species_OTL` random effect by its name.
+
+Note: remember to add underscores to the OTL species names, because the tree tip names (and so the row names of `phylo_cor`) have underscores.
+
+```{r}
+#| label: analysis
+
+# Add underscores to the OTL species names so they match the tree
+zr_data$species_OTL <- str_replace_all(zr_data$species_OTL, " ", "_")
+
+# Phylogenetic multilevel meta-analysis
+overall_model <- rma.mv(yi = Zr,
+                        V = V_Zr,
+                        mod = ~ 1,                         # intercept only: the overall mean
+                        random = list(~ 1 | study_ID,      # among studies
+                                      ~ 1 | es_ID,         # within studies (residual)
+                                      ~ 1 | species,       # among species (non-phylogenetic)
+                                      ~ 1 | species_OTL),  # phylogeny
+                        R = list(species_OTL = phylo_cor), # correlation matrix for species_OTL
+                        method = "REML",
+                        test = "t",
+                        dfs = "contain",
+                        data = zr_data)
+
+summary(overall_model)
+```
+
+#### What does the model output tell us?
+
+::: {.panel-tabset}
+
+## Task
+
+>**Is there an overall positive or negative relationship between physiology and movement?** 
+
+## Answer
+
+>We can see from above that the model estimates **a `r ifelse(overall_model$b[1] > 0, 'positive', 'negative')` relationship** between physiology and movement, with **an overall mean of `r round(overall_model$b[1], 3)` and a 95% confidence interval (95% CI) of `r round(overall_model$ci.lb, 3)` to `r round(overall_model$ci.ub, 3)`**. In this analysis, we also observe high heterogeneity among our effect size estimates, with a significant *Q*-test, a very common observation in ecological and evolutionary meta-analysis studies. Some of this heterogeneity may be driven by variation among studies, within studies, among species, and phylogeny as seen by the variance components of the model.
+
+:::
+
+<br>
+
+## Interpreting the output
+
+- The `R` column in *Variance Components* says `yes` for `species_OTL`: that random effect uses the matrix $\textbf{A}$ (`phylo_cor`).
+- **Phylogenetic heritability** – the proportion of among-species variation explained by phylogeny:
+
+```{r}
+#| label: h2
+# The variance components, in the same order as the random list
+s2 <- overall_model$sigma2
+names(s2) <- c("study", "es", "species", "phylo")
+round(s2, 4)
+
+# Phylogenetic heritability: phylogenetic variance / all species-level variance
+H2_phylo <- s2[["phylo"]] / (s2[["phylo"]] + s2[["species"]])
+round(H2_phylo, 2)
+
+# I2 for each random effect
+round(i2_ml(overall_model), 1)
+```
+
+**Interpretation.**
+
+```{r}
+#| label: interp-values
+#| include: false
+# Values used in the text below
+i2_overall   <- i2_ml(overall_model)                   # I2: total and per random effect
+pred_overall <- predict(overall_model, transf = tanh)  # mean, 95% CI and 95% PI back-transformed to r
+n_species    <- length(unique(zr_data$species_OTL))    # number of species
+n_studies    <- length(unique(zr_data$study_ID))       # number of studies
+```
+
+- On average, physiological traits were `r if_else(overall_model$b[1] > 0, "positively", "negatively")` correlated with movement (*Zr* = `r sprintf("%.3f", overall_model$b[1])`, 95% CI `r sprintf("%.3f", overall_model$ci.lb)` to `r sprintf("%.3f", overall_model$ci.ub)`; *t*~`r overall_model$ddf`~ = `r sprintf("%.2f", overall_model$zval)`, *p* `r fmt_p(overall_model$pval)`). Back-transformed, this is a correlation of *r* = `r sprintf("%.2f", pred_overall$pred)` (95% CI `r sprintf("%.2f", pred_overall$ci.lb)` to `r sprintf("%.2f", pred_overall$ci.ub)`), which is `r if_else(abs(pred_overall$pred) < 0.1, "negligible", if_else(abs(pred_overall$pred) < 0.3, "small", if_else(abs(pred_overall$pred) < 0.5, "moderate", "large")))` by conventional benchmarks. `r if_else(overall_model$pval < 0.05, "The confidence interval excludes zero, so there is evidence of a non-zero average relationship.", "The confidence interval includes zero, so there is no clear evidence of an average relationship.")`
+- Heterogeneity is `r if_else(i2_overall[1] > 75, "high", if_else(i2_overall[1] > 50, "moderate", "low"))` ($I^2_{total}$ = `r sprintf("%.1f", i2_overall[1])`%), and the 95% prediction interval runs from *r* = `r sprintf("%.2f", pred_overall$pi.lb)` to `r sprintf("%.2f", pred_overall$pi.ub)`. `r if_else(pred_overall$pi.lb < 0 & pred_overall$pi.ub > 0, "In a new study, the relationship could therefore be negative or positive: the average hides strong context dependence, which motivates meta-regression.", "In a new study, the relationship is expected to have the same sign as the mean.")`
+- Variance partitioning: between-study differences account for `r sprintf("%.1f", i2_overall["I2_study_ID"])`% of the total variation, effect sizes within studies for `r sprintf("%.1f", i2_overall["I2_es_ID"])`%, non-phylogenetic species differences for `r sprintf("%.1f", i2_overall["I2_species"])`% and phylogeny for `r sprintf("%.1f", i2_overall["I2_species_OTL"])`%. Phylogenetic heritability is *H*² = `r sprintf("%.2f", H2_phylo)`: `r if_else(H2_phylo > 0.5, "most of the among-species variation is phylogenetically structured, so closely related species tend to show similar physiology–movement relationships.", if_else(H2_phylo > 0.1, "part of the among-species variation is phylogenetically structured.", "phylogeny explains almost none of the among-species variation, so closely related species are not more similar than distantly related ones."))` With `r n_species` species and a tree with Grafen branch lengths (not divergence times) and randomly resolved polytomies, $\sigma^2_{a}$ (phylogenetic variance) is estimated imprecisely. Check its sensitivity to the tree, e.g., with a different `set.seed()` in `multi2di()`.
+- `r if_else(s2["study"] < 0.001, "The study-level variance is close to zero once species effects are included. Most studies use a single species, so study and species are partly confounded and the model cannot fully separate them.", "Study-level variance remains after accounting for species and phylogeny, so studies differ for reasons beyond the species they used (e.g., protocols, traits measured).")` Fitting the phylogenetic model is good practice even when $\sigma^2_{a}$ is small, because it shows whether the mean is robust to shared ancestry across the `r n_species` species from `r n_studies` studies.
+
+## Orchard plot
+
+```{r}
+#| label: fig-orchard-phylo
+#| fig-cap: "Orchard plot of the phylogenetic multilevel model (Zr)."
+#| fig-height: 3.4
+
+orchard_plot(overall_model,
+             mod = "1",              # overall mean
+             group = "study_ID",     # count the number of studies
+             xlab = "Fisher's Zr",
+             cb = FALSE)             # use the workshop's red colours
+```
+
+::: 
+
+
+# Writing it up
+
+There are a tonne of different sources of non-independence you might encounter in meta-analysis – some of these are somewhat unique [@Noble2017]. Here, we have covered two common sources: shared controls and phylogeny. Unfortunately, we don't have time (or enough examples) to overview all the different types and how to deal with them. In some cases, it may not really matter whether all sources are correctly dealt with in the model, and it can get quite complex such that it may not be possible to deal with them all anyway. 
+
+Having said that, @Noble2017 recommend: 
+
+1. reporting on the different sources of non-independence explicitly; and
+2. conducting sensitivity analyses to explore the impacts of non-independence on inferences.
+
+The use of robust variance estimators shows immense promise in dealing with multiple forms of dependency within a data set without having to specify it all explicitly [@Pustejovsky2021; @Tipton2013; @Hedges2010; @Hedges2019; @Nakagawa2021; @Song2021].
+
+
+Here is an example write up of the `overall_model` phylogenetic multilevel meta-analysis with `study_ID`, `es_ID`, `species` and `species_OTL` as random effects.
+
+::: {.writeup}
+We quantified the relationship between physiology and movement as Fisher's *Z*-transformed correlation coefficient (*Zr*), with sampling variance 1/(*n* − 3). To account for non-independence, we fitted a phylogenetic multilevel meta-analysis with random effects for study, effect-size identity, species and phylogeny [@Cinar2021], using `rma.mv` in metafor with REML estimation and *t*-tests with containment degrees of freedom [@Viechtbauer2010]. The phylogeny of the `r n_species` species was obtained from the Open Tree of Life (`rotl`). Branch lengths were computed with Grafen's method, polytomies were resolved at random, and the phylogenetic correlation matrix was derived assuming Brownian motion (`ape::vcv`).
+
+Across *k* = `r overall_model$k` effect sizes from `r n_studies` studies and `r n_species` species, physiological traits were `r if_else(overall_model$b[1] > 0, "positively", "negatively")` correlated with movement on average (*Zr* = `r sprintf("%.3f", overall_model$b[1])`, 95% CI `r sprintf("%.3f", overall_model$ci.lb)` to `r sprintf("%.3f", overall_model$ci.ub)`; *t*~`r overall_model$ddf`~ = `r sprintf("%.2f", overall_model$zval)`, *p* `r fmt_p(overall_model$pval)`), equivalent to *r* = `r sprintf("%.2f", pred_overall$pred)` (95% CI `r sprintf("%.2f", pred_overall$ci.lb)` to `r sprintf("%.2f", pred_overall$ci.ub)`). Total heterogeneity was `r sprintf("%.0f", i2_overall[1])`% ($I^2_{total}$). Of this, phylogeny accounted for `r sprintf("%.0f", i2_overall["I2_species_OTL"])`%, non-phylogenetic species differences for `r sprintf("%.0f", i2_overall["I2_species"])`%, between-study differences for `r sprintf("%.0f", i2_overall["I2_study_ID"])`% and within-study differences for `r sprintf("%.0f", i2_overall["I2_es_ID"])`% (phylogenetic heritability *H*² = `r sprintf("%.2f", H2_phylo)`). The 95% prediction interval ranged from *r* = `r sprintf("%.2f", pred_overall$pi.lb)` to `r sprintf("%.2f", pred_overall$pi.ub)`.
+:::
+
+
+# References
+
+<div id="refs"></div>
+
+<br>
