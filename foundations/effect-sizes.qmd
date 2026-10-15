@@ -117,7 +117,7 @@ zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-worksho
 zr_data <- zr_data %>%
   select(study_ID, taxa, species, trait, response, response_unit,
          disp_trait, disp_unit, corr_coeff, sample_size) %>%
-  slice(1:10)
+  dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
 
 # Calculate Fisher's z-transformed correlation (measure = "ZCOR")
 #   ri = the correlation coefficient in each row
@@ -228,7 +228,7 @@ ratio_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-work
 ratio_data <- ratio_data %>%
   select(study_ID, taxa, species, trait, response, response_unit,
          mean_core, sd_core, n_core, mean_front, sd_front, n_front) %>%
-  slice(1:10)
+  dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
 
 # Calculate the log response ratio (measure = "ROM", the 'ratio of means')
 #   group 1 (numerator)   = edge (front) population

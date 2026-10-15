@@ -16,3 +16,5 @@ brms_fits/*.rds
 # OS files
 .DS_Store
 Thumbs.db
+
+**/*.quarto_ipynb
