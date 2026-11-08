@@ -1,0 +1,735 @@
+---
+title: "Effect sizes"
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(metafor)
+library(patchwork) # to place ggplots side by side
+library(flextable)
+source(here::here("R", "theme_workshop.R"))
+```
+
+Meta-analysis quantitatively aggregates effect size data collected from existing research. The effect size one uses for a study question needs to be chosen carefully. Each makes certain assumptions about the underlying data. It's important to be wary of these assumptions and identify when something might have gone wrong. 
+
+The effect size chosen must satisfy two important features. First, the **effect size must be comparable across studies**. This means that they must be placed on the same scale so that they can be aggregated. Some effect size estimates can be inter-converted to each other (e.g., Zr, Hedges' g), but this isn't the case for all of them. Second, we must be able to **derive or approximate the sampling variance** for a given effect size. The sampling variance is very important if one wishes to use meta-analytic models that account for sampling variance and is needed to report certain measures of [heterogeneity](2-2-heterogeneity.qmd). 
+
+Meta-analyses in comparative physiology, and indeed, ecology and evolution more generally, often use highly heterogeneous data [@Noble2022; @Senior2016]. This poses other challenges in aggregating effect size data that make their comparability questionable. We'll discuss some of these issues and identify some ways in which some of this heterogeneity can be dealt with when deriving the effect size itself. 
+
+# Common Effect Sizes
+
+What is an effect size? The answer to this question depends on what kind of study one wishes to synthesise. For example, an effect size could be a contrast between experimental treatments. We might extract mean differences from experiments manipulating, say, bisphenol-A (BPA) and looking at the effect of BPA on aquatic ectotherm phenotype relative to some control [@WuSeebacher2020]. Alternatively, the effect of interest might be the magnitude and direction of a correlation between two observed variables, such as metabolism and behaviour [@Holtman2016]. At times, we might even just be interested in analysing the mean or variance itself. 
+
+> "An effect size is a statistical parameter that can be used to compare, on the same scale, the results of different studies in which a common effect of interest has been measured" [@Rosenberg2013]
+
+There are many types of effect sizes that are commonplace in ecological and evolutionary research (Some common examples in **Table 1**).
+
+
+```{r}
+#| label: tbl-tablea
+#| echo: false
+#| tbl-cap: "**Common effect sizes used throughout meta-analyses in comparative physiology, their associated sampling variances and examples on when they might be used**. M: mean; SD: standard deviation; N: sample size; CTmin: critical thermal minimum; CTmax: critical thermal maximum; LC_50: median lethal concentration; LT_50: median lethal temperature; BPA: bisphenol A."
+
+FitFlextableToPage <- function(ft, pgwidth = 6){
+
+  ft_out <- ft %>% flextable::autofit()
+
+  ft_out <- flextable::width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable::flextable_dim(ft_out)$widths))
+  return(ft_out)
+} 
+
+# I'm just listing a bunch here, but we should think about what we want to include. Here's an example of how we can make a table with all equations. Fun! Really useful website here: https://math.meta.stackexchange.com/questions/5020/mathjax-basic-tutorial-and-quick-reference. Something wrong with character coding when rendering word document. Has to do with the log odds ratio equation. Renders fine in html, but just stops when word
+names <- c("Mean",
+           "Log Standard deviation, lnSD",
+           "Log Response Ratio, lnRR",
+           # leave this for now??? - we introduce this later
+           "Standardised Mean Difference, SMD",
+           "Zr (Fisher Transformation of \n Correlation Coefficient, r)")
+           #"Log Odds Ratio",
+           #"")
+
+# the index i is not really applied consistently so I am adding it more (to do)
+# we shoudl discuss what kinds of notations we want to use consistely
+           
+eqns_yi <- c("M",
+             "\\ln{SD} + \\frac{1}{2(N - 1)}",
+             # Senior will have a better version but this is good for now
+             "\\ln \\left( \\frac{M_{1}}{M_{2}}\\right)",
+             "\\frac{\\left( M_{2} - M_{1}\\right)}{SD_{p}}J",
+             # we need to spell out SD_p somewhere
+             "\\frac{1}{2}log \\left( \\frac{1+r}{1-r}\\right)")
+             #"log\\left(\\frac{y_{i2}+0.5}{n_{i2}-y_{i2}+0.5}\\right) ",
+             #"- log\\left(\\frac{y_{i1}+0.5}{n_{i1}-y_{i1}+0.5}\\right)")
+             
+# Just placeholders for now
+eqns_vi <- c("\\frac{SD^2}{N}",
+             "\\frac{1}{2(N - 1)}",
+             "\\frac{SD_{1}^2} {M^2_{1}N_{1}} + \\frac{SD_{2}^2} {M^2_{2}N_{2}}",
+             "\\frac{N_{1} + N_{2}}{N_{1}N_{2}} + \\frac{SMD^2}{2(N_{1} + N_{2})}",
+             # see my commenst
+             "\\frac{1}{N - 3}")
+             #"\\frac{s_{i}^2}{n_{i}}",
+             #"")
+
+# Maybe add some examples for each effect size in a new column. SHould help
+eg <- c("CTmin, CTmax, LC50, LT50, Metabolic Rate (MR)",
+        "Variability in CTmin, CTmax, Metabolic Rate (MR)",
+        "Ratio between pollutant exposed treatment (e.g., BPA-exposed group) and control (no pollutant)",
+        "Difference in immune response between males and females, performance difference in the presence of stressor compared to absence of stressor",
+        "Relationship between sex hormones and immune responses or metabolic rate and behaviour")
+
+table_fin <- data.frame(names, eqns_yi, eqns_vi, eg)
+
+footnotes <- c("Notes: J = 1 - \\frac{3}{4\\left(N_{1} + N_{2} - 2\\right) - 1}",
+               "SD_{p} = \\sqrt \\frac{\\left( N_{1}-1 \\right)SD_{1}^2 + \\left( N_{2}-1 \\right)SD_{2}^2}{N_{1} + N_{2} - 2}")
+
+# Note: It is esssential that you be clear that the function 'compose' is exported from the flextable package. That's because purr also has the same function, so it gets messy.
+tablea <- flextable(table_fin)                                                                                %>% 
+          flextable::compose(j = 1:4, part = "header", value = as_paragraph(as_b(c("Effect Measure", "Definition", "Sampling Variance", "Examples")))) %>% 
+          flextable::compose(j = 2:3, value = as_paragraph(as_equation(c( eqns_yi, eqns_vi))))             %>%
+          flextable::compose(j = 4, value = as_paragraph(eg))             %>%
+          flextable::width(j = 1, 3)                                                                          %>% 
+          flextable::width(j = 2, 2) %>% 
+          flextable::width(j = 4, 5) %>% 
+          flextable::footnote(i = 4, j = 1, value = as_paragraph(as_equation(footnotes)),
+               ref_symbols = c("a"),
+               part = "body", inline = TRUE) %>% 
+          flextable::font(part = "all", fontname = "Times New Roman")
+          
+FitFlextableToPage(tablea, pgwidth = 8)
+```
+
+We'll use `metafor` to demonstrate how to calculate commonly used effect size estimates in the field of comparative physiology, including Z-transformed correlation coefficients (Zr), log response ratios and Hedges' g. 
+
+::: {.panel-tabset .nav-pills}
+
+## Correlation coefficients: *r* and *Zr*
+
+The Pearson correlation $r$ measures the strength and direction of a linear relationship between two continuous traits measured on the same individuals. It is bounded between −1 and 1, so its sampling distribution becomes **skewed** as $r$ approaches 1 and its variance depends on $r$ itself:
+
+$$
+v_r = \frac{(1 - r^2)^2}{n - 1}
+$$
+
+Fisher's *z*-transformation ($Zr$) fixes both problems:
+
+$$
+Zr = \frac{1}{2}\ln\left(\frac{1 + r}{1 - r}\right), \qquad v_{Zr} = \frac{1}{n - 3}, \qquad r = \tanh(Zr)
+$$
+The relationship between $r$ and $Zr$ can be seen here (**Fig. 1**):
+
+```{r}
+#| label: fig-zr
+#| echo: false
+#| fig-cap: "Left: Fisher's transformation is nearly linear for small $r$ but stretches values near ±1. Right: sampling distributions of $r$ and $Zr$ from 5,000 simulated samples of n = 15 when the true correlation is 0.8. $r$ is skewed; $Zr$ is approximately normal."
+#| fig-height: 3
+p1 <- tibble(r = seq(-0.99, 0.99, by = 0.01)) |>
+  mutate(Zr = atanh(r)) |>
+  ggplot(aes(r, Zr)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_line(linewidth = 1.1, colour = pal["blue"]) +
+  labs(title = "r vs Zr")
+
+set.seed(1)
+sims <- tibble(rep = 1:5000) |>
+  mutate(r = map_dbl(rep, ~ {
+    x <- MASS::mvrnorm(15, mu = c(0, 0), Sigma = matrix(c(1, .8, .8, 1), 2))
+    cor(x[, 1], x[, 2])
+  }), Zr = atanh(r)) |>
+  pivot_longer(c(r, Zr), names_to = "scale")
+
+p2 <- ggplot(sims, aes(value, fill = scale)) +
+  geom_histogram(bins = 40, alpha = 0.85) +
+  facet_wrap(~scale, scales = "free_x") +
+  scale_fill_manual(values = unname(pal[c("orange", "blue")]), guide = "none") +
+  labs(x = NULL, y = "Count", title = "Sampling distributions (true r = 0.8, n = 15)")
+
+p1 + p2 + plot_layout(widths = c(1, 2))
+```
+
+### Example calculation of Zr
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/WuSeebacher.png)
+
+**Background**: Physiology is expected to drive movement, including short-term activity, exploration of unfamiliar environments, and larger scale dispersal which can influence species distributions in an environmentally sensitive manner. To test whether there is a relationship between physiology and movement pattern (separated as activity, exploration, and dispersal), we extracted data from the literature on common physiological traits measured (e.g., metabolic rate, hormone levels, body condition) with either activity, exploration, and dispersal at the individual level. As we are interested in relationships at the individual level, we extracted correlation data in the form of [correlation coefficient](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient) and sample size.
+
+For complete detail on the study aim and design, please see [@WuSeebacher2022](https://doi.org/10.1038/s42003-022-03055-y)
+
+Download the data. The following code illustrates how to calculate the Fisher z-transformed effect size (`Zr`) and sampling variance (`V_Zr`) from correlation coefficients (ri) and sample size (ni) using 10 rows of data from the main dataset.
+
+`Zr` and `V_Zr` can be calculated with the `metafor::escalc` function with `measure = "ZCOR"`.
+
+```{r}
+#| label: Zr
+#| message: false
+
+# Download and clean data
+zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
+  dplyr::select(study_ID, taxa, species, trait, response, response_unit, disp_trait, disp_unit, corr_coeff, sample_size) %>% # remove irrelevant columns for this tutorial
+  dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
+
+# Calculate Fisher's r-to-z transformed correlation coefficient (ZCOR) as yi = effect size and vi = sampling variances, where ri = raw correlation coefficients, and ni = sample size.
+zr_data <- metafor::escalc(measure = "ZCOR", ri = corr_coeff, ni = sample_size, data = zr_data, var.names = c("Zr", "V_Zr"))
+
+zr_data
+```
+
+We want to convert to Zr instead of using the correlation (r) itself because Zr will satisfy assumptions of normality (see below) that are inherent to meta-analytic models. We can, however, convert back to the original correlation coefficient quite easily as follows:
+
+```{r}
+#| label: Zrescalcbackcalc
+#| echo: true
+
+# We can easily convert back to r as follows
+zr_data$r <- tanh(zr_data$Zr)
+
+zr_data %>% select(corr_coeff, r)
+```
+
+The correlation coefficient itself is a unitless measure that captures both the strength and direction of relationship between two variables. The raw correlation coefficient ranges from -1 to 1. If a correlation is positive it indicates that, as the value of one variable increases so too does the value of the second variable. The magnitude of the value indicates how strongly they co-vary. For example, a correlation of 1 indicates that variable 1 perfectly co-varies with variable 2.
+
+
+## Mean differences: lnRR and SMD
+
+Most physiological experiments compare a **treatment** group (T) with a **control** group (C), reporting means ($\bar{X}$), standard deviations (*SD*) and sample sizes (*n*).
+
+### Log response ratio (lnRR)
+
+$$
+\text{lnRR} = \ln\left(\frac{\bar{X}_T}{\bar{X}_C}\right), \qquad
+v_{\text{lnRR}} = \frac{SD_T^2}{n_T \bar{X}_T^2} + \frac{SD_C^2}{n_C \bar{X}_C^2}
+$$
+
+lnRR is the **proportional** change: $100 \times (e^{\text{lnRR}} - 1)$ = % difference. It requires a **ratio scale** (a true zero, all values positive) — fine for metabolic rate, heart rate or growth, but *not* for CTmax in °C or for scores that can be negative. The log makes the ratio symmetric: halving (ln 0.5 = −0.69) and doubling (ln 2 = +0.69) are equidistant from zero.
+
+### Standardised mean difference (SMD; Hedges' *g*)
+
+$$
+\text{SMD} = \frac{\bar{X}_T - \bar{X}_C}{SD_{pooled}} \, J, \qquad
+SD_{pooled} = \sqrt{\frac{(n_T - 1)SD_T^2 + (n_C - 1)SD_C^2}{n_T + n_C - 2}}
+$$
+
+$$
+J \approx 1 - \frac{3}{4(n_T + n_C - 2) - 1}, \qquad
+v_{\text{SMD}} = \frac{n_T + n_C}{n_T n_C} + \frac{\text{SMD}^2}{2(n_T + n_C)}
+$$
+
+SMD expresses the difference in **standard-deviation units**. *J* corrects a small-sample bias (that's what makes it Hedges' *g* rather than Cohen's *d*). Benchmarks: 0.2 small, 0.5 medium, 0.8 large.
+
+```{r}
+#| label: fig-lnrr-smd
+#| echo: false
+#| fig-cap: "The same 20% increase in mean (lnRR = 0.18) corresponds to very different SMDs depending on how variable the trait is. lnRR describes the *proportional* shift; SMD describes the *overlap* between groups."
+#| fig-height: 3.6
+dens <- expand_grid(cv = c(0.1, 0.3), x = seq(0, 25, by = 0.05)) |>
+  mutate(Control   = dnorm(x, 10, 10 * cv),
+         Treatment = dnorm(x, 12, 12 * cv)) |>
+  pivot_longer(c(Control, Treatment), names_to = "group", values_to = "density") |>
+  mutate(panel = if_else(cv == 0.1,
+                         sprintf("Low variability: SMD ≈ %.1f", 2 / sqrt((1^2 + 1.2^2) / 2)),
+                         sprintf("High variability: SMD ≈ %.1f", 2 / sqrt((3^2 + 3.6^2) / 2))))
+
+ggplot(dens, aes(x, density, fill = group)) +
+  geom_area(alpha = 0.55, position = "identity", colour = "grey30", linewidth = 0.3) +
+  facet_wrap(~panel, scales = "free_y") +
+  scale_fill_manual(values = unname(pal[c("sky", "red")]), name = NULL) +
+  labs(x = "Metabolic rate (mL O2 / h)", y = NULL,
+       subtitle = "Treatment mean = 12, control mean = 10 in both panels: lnRR = ln(12/10) = 0.18")
+```
+
+
+### Example calculation of lnRR
+
+If movement relied on physiological capacities, it may be expected that the variation in physiological characteristics introduces differences in the tendency to move among individuals of the same populations. Such individual differences can have consequences for gene flow and genetic diversification within a species. Individuals with a greater tendency to move may have particular physiological characteristics, leading to core-edge differences. Populations at the range edge are therefore hypothesised to have a different physiological phenotype than populations from the core range. 
+
+To compare differences in the physiological characteristics between individuals from an established range core to their expanding range edge we collected data from studies that reported physiological response from the range core (core) and range edge (front) in the form of mean, sample size, and variance (SD, SE, or 95% CI). This information is used to calculate the log response ratio (lnRR).
+
+For complete detail on the study aim and design, please see [@WuSeebacher2022](https://doi.org/10.1038/s42003-022-03055-y)
+
+Download the data. The following code illustrates how to calculate the log response ratio (`yi`) and sampling variance (vi) from the mean (`mi`), sample size (`ni`) and standard deviation (`sdi`) from the edge population (1), and core population (2) using 10 rows of data from the main dataset.
+
+`yi` and `vi` can be calculated with the `metafor::escalc` function with `measure = "ROM"`.
+
+```{r}
+#| label: lnRR
+#| message: false
+
+# Download and clean data
+ratio_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/pop_disp_raw_data.csv") %>%
+  dplyr::select(study_ID, taxa, species, trait, response, response_unit, mean_core, sd_core, n_core, mean_front, sd_front, n_front) %>% # remove irrelevant columns for this tutorial
+  dplyr::top_n(10) # select first 10 effect sizes to illustrate escalc function
+
+# Calculate log response ratio (lnRR) as yi = effect size and vi = sampling variances, where m1i = mean of edge population, n1i = sample size of edge population, sd1i = standard deviation of edge population, m2i = mean of core population, n2i = sample size of core population, sd2i = standard deviation of core population.
+ratio_data <- metafor::escalc(measure = "ROM", 
+                              m1i = mean_front, n1i = n_front, sd1i = sd_front,
+                              m2i = mean_core, n2i = n_core, sd2i = sd_core, 
+                              data = ratio_data)
+ratio_data
+```
+
+Now that we have calculated the log response ratio let's just make sure we understand what is being done. We'll take this subset of data and do some back calculations to make sure we understand how to inter-convert. To demonstrate, we'll just convert (and back convert) the first row of data. 
+
+### Testing your Understanding of $lnRR$
+
+::: {.panel-tabset}
+
+# Task 1
+
+>**Using the first row of the data, calculate the log response ratio for this observation by hand. What does the direction of the effect size tell you about the mean at the marginal compared to core?**
+
+# Answer 1
+
+>The effect size is positive indicating that the mean of the marginal (`mean_front`) is larger than the mean of the core population (`mean_core`). We can see that by calculating the effect size in two ways, the second of which is easier to see why.
+ 
+```{r}
+#| label: ConvertLnRR
+#| echo: true
+
+### Let's back calculate effects to make sure we understand why they are interpreted as percentage differences
+
+# First, let's make sure we understand how it's calculated
+with(ratio_data, log(mean_front[1] / mean_core[1]))
+
+# Alternatively....
+with(ratio_data, log(mean_front[1]) - log(mean_core[1]))
+```
+
+# Task 2
+
+>**What does the value of the effect size tell you about how much the mean differs between marginal and core populations?**
+
+# Answer 2
+
+>What this tells us is that the numerator is 1.15 times the denominator, or, that the marginal (front) mean is 15% larger compared to the core mean. We can see that this is true as follows:
+
+```{r}
+#| label: ConvertLnRR2
+#| echo: true
+
+# Now let's back-transform to odds. 
+with(ratio_data, exp(log(mean_front[1]) - log(mean_core[1])))
+
+# Interpretation: What this tells us is that the numerator is 1.15 times the denominator, or, that the marginal (front) mean is 15% larger compared to the core mean. We can see that this is true as follows:
+with(ratio_data, exp(log(mean_front[1]) - log(mean_core[1])) * mean_core[1])
+
+# This value should now match the marginal mean value, which it does
+with(ratio_data, mean_front[1])
+```
+
+>A simple way to remember how to interpret this is to think that a converted *lnRR* = 1 means the two are the same. If you are 'subtracting' the marginal population from the core population and the effect size is positive, than 1.15 indicates that the marginal population is ~15% larger, whereas if the effect size is -1.15 than it indicates that the core population is 15% larger. 
+
+<br>
+
+Hopefully this is useful to interpret the meaning of the effect size data at the level of individual observations. The same principles will apply (for the most part) when converting back to the original scale from the mean estimates from meta-analytic models. 
+
+:::
+
+### Example calculation of Hedges' g
+
+We could also use [@WuSeebacher2022](https://doi.org/10.1038/s42003-022-03055-y)'s data to calculate Hedges' g. Hedges' g is very similar to Cohen's d, but it has a small sample correction. This can also be done with `metafor::escalc()` by setting `measure = "SMD"`.  We can use the same data here as all the summary statistics that are needed for calculating lnRR are the same as Hedges' g. 
+
+
+```{r hedges}
+# Calculate hedges g as yi = effect size and vi = sampling variances, where m1i = mean of edge population, n1i = sample size of edge population, sd1i = standard deviation of edge population, m2i = mean of core population, n2i = sample size of core population, sd2i = standard deviation of core population.
+hedge_data <- metafor::escalc(measure = "SMD", 
+                              m1i = mean_front, n1i = n_front, sd1i = sd_front,
+                              m2i = mean_core, n2i = n_core, sd2i = sd_core, 
+                              data = ratio_data, var.names = c("d", "d_vi"))
+hedge_data
+```
+
+Visualising and interpreting Hedges' g can be slightly less intuitive compared to log response ratios. There's a great [online resource](https://rpsychologist.com/cohend/) by Kristoffer Magnusson with some visuals that can help you decipher the meaning of Cohen's d effects, which is the same as Hedges' g. 
+
+## Binary outcomes: odds ratio and risk ratio
+
+Some physiological outcomes are counts of individuals that did / did not experience an event — e.g. embryos that hatched, animals that survived a heat challenge. Each study gives a 2 × 2 table:
+
+|           | Event (e.g. died) | No event (survived) |
+|-----------|-------------------|---------------------|
+| Treatment | *a*               | *b*                 |
+| Control   | *c*               | *d*                 |
+
+There are three ways you can calculate effect size from this arrangement:
+
+| Effect size | Formula | Sampling variance | `measure` |
+|---|---|---|---|
+| log odds ratio | $\ln\frac{a/b}{c/d}$ | $\frac{1}{a}+\frac{1}{b}+\frac{1}{c}+\frac{1}{d}$ | `"OR"` |
+| log risk ratio (**relative risk**) | $\ln\frac{a/(a+b)}{c/(c+d)}$ | $\frac{1}{a}-\frac{1}{a+b}+\frac{1}{c}-\frac{1}{c+d}$ | `"RR"` |
+| risk difference | $\frac{a}{a+b}-\frac{c}{c+d}$ | $\frac{p_T(1-p_T)}{n_T}+\frac{p_C(1-p_C)}{n_C}$ | `"RD"` |
+
+"Risk ratio" and "relative risk" are the same quantity. Both ORs and RRs are analysed on the **log scale** and back-transformed with `exp()`. The **risk ratio** is easier to communicate ("1.5 × more likely to die"); the **odds ratio** has better statistical properties when baseline risks differ a lot among studies. `escalc()` automatically adds 0.5 to all cells of a table that contains a zero.
+
+```{r}
+#| label: binary
+# Embryo mortality at a high (34 °C) vs control (28 °C) incubation temperature
+embryo <- tribble(
+  ~study, ~species,               ~dead_hot, ~alive_hot, ~dead_ctrl, ~alive_ctrl,
+  "A",    "Chelonia mydas",              18,         32,          6,          44,
+  "B",    "Lampropholis delicata",        9,         21,          4,          26,
+  "C",    "Pogona vitticeps",             5,         35,          0,          40
+)
+
+embryo_es <- embryo |>
+  escalc(measure = "OR", ai = dead_hot, bi = alive_hot, ci = dead_ctrl, di = alive_ctrl,
+         data = _, var.names = c("lnOR", "v_lnOR")) |>
+  escalc(measure = "RR", ai = dead_hot, bi = alive_hot, ci = dead_ctrl, di = alive_ctrl,
+         data = _, var.names = c("lnRiskR", "v_lnRiskR"))
+
+embryo_es |>
+  as_tibble() |>
+  mutate(OR = exp(lnOR), risk_ratio = exp(lnRiskR)) |>
+  select(study, lnOR, v_lnOR, OR, lnRiskR, risk_ratio)
+```
+
+**Interpretation.** In study A, embryos at 34 °C had `r round(exp(embryo_es$lnOR[1]), 1)` times the odds, and `r round(exp(embryo_es$lnRiskR[1]), 1)` time the risk, of dying compared with controls. 
+
+:::
+
+---
+
+# Nuisance heterogeneity
+
+**Nuisance heterogeneity** -- known methodological or design-level variables that drive effect size magnitude but are not themselves the biological question of interest, such as the dose, exposure duration, or temperature difference applied across treatments -- are common in comparative physiology meta-analyses [@Noble2022; @Borenstein2019]. 
+
+**Nuisance heterogeneity can be a big driver of effect size magnitude**. For example, a contrast-based effect size, such as log response ratio, calculated from a study that has manipulated treatments to have a 10$^{\circ}$C temperature difference between treatments is likely going to give you a much larger effect size than a study that manipulated a treatment temperature difference of 2$^{\circ}$C. Amalgamating such effects within a meta-analysis will make the interpretation of effect magnitude complicated because it's difficult to know what magnitude of, say temperature, our effect size should be interpreted over.
+
+There are two main ways to deal with nuisance heterogeneity. The most common approach is to **include a moderator in a meta-regression model that controls for, e.g., the temperature difference between treatments** [@Noble2022]. You can re-scale this continuous moderator (centre the variable on the mean so '0' equates to the average difference) so that intercepts can be interpreted more easily [@Noble2022].
+
+Alternatively, we can **'correct' our effect sizes** to account for the nuisance variable before fitting any model. The two approaches differ in what they assume: a meta-regression moderator *estimates* the functional form of the nuisance relationship from the data, while effect-size correction *assumes* a particular functional form (e.g., the exponential temperature scaling implied by $Q_{10}$) and bakes it into every effect size at the outset. When the functional form is well-established from theory or physiology, effect-size correction is usually cleaner because it simplifies modelling and gives every effect size a common interpretation up front. In this tutorial, we'll overview the effect-size correction approach.
+
+**Effect Sizes Corrected for Nuisance Heterogeneity**
+
+::: {.panel-tabset .nav-pills}
+
+## Temperature Coefficient, $Q_{10}$
+
+One common and well known effect size that is used in comparative physiology is the [temperature coefficient, $Q_{10}$](https://en.wikipedia.org/wiki/Q10_(temperature_coefficient)). As [discussed](effect-size.qmd), effect sizes need to be: 1) comparable across studies and 2) we need to know, or be able to approximate, the sampling variance in order to make use of meta-analytic models. While $Q_{10}$ satisfies 1), we do *not* know what the sampling variance should be for this effect size. @Noble2022 fixes that issue by deriving its sampling variance.
+
+To begin, recall that $Q_{10}$ is defined as: 
+
+
+$$
+Q_{10} = \left( \frac{R_{2}}{R_{1}} \right)^{ \left(\ \frac{10^{\circ}C}{T_{2}-T_{1}} \right) }
+$$ {#eq-q10}
+
+Here, $R_{1}$ and $R_{2}$ are mean physiological rates and $T_{1}$ and $T_{2}$ are the temperatures at which these rates are measured. Natural log transformation of @eq-q10 leads to the following log transformed $Q_{10}$:
+
+$$
+lnRR_{Q_{10}} = ln\left( \frac{R_{2}}{R_{1}} \right){ \left(\ \frac{10^{\circ}C}{T_{2}-T_{1}} \right) }
+$$ {#eq-lnq10}
+
+@Noble2022 call this transformed effect size $LnRR_{Q_{10}}$ because of its similarities with the log response ratio. @eq-lnq10 is essentially a temperature-corrected equivalent of *lnRR* when the numerator and denominator are measured at different temperatures. $lnRR_{Q_{10}}$ is more likely to satisfy the assumption of residual normality than $Q_{10}$ and given its similarities to *lnRR* we can now approximate its sampling variance [see @Hedges1999]. The recognition of this equivalence means that we can calculate the sampling variance for @eq-lnq10 as follows:
+
+$$
+s^2_{lnRR_{Q_{10}}} = \left( \frac{SD_{2}^2}{R^2_{2}N_{2}} + \frac{SD_{1}^2}{R^2_{1}N_{1}} \right){ \left(\ \frac{10^{\circ}C}{T_{2}-T_{1}} \right) }^2
+$$ {#eq-Vlnq10}
+
+
+Studies often differ in "design" variables that strongly affect the effect size but are not the question of interest — e.g. **how many degrees** apart two treatment temperatures were. A 10 °C difference produces a much larger lnRR than a 2 °C difference. This is **nuisance heterogeneity** [@Noble2022]. One solution is to standardise the effect size by the nuisance variable *before* the meta-analysis.
+
+It is simply lnRR rescaled to a 10 °C difference; $e^{\text{lnRR}_{Q_{10}}} = Q_{10}$.
+
+```{r}
+#| label: fig-q10
+#| echo: false
+#| fig-cap: "Two hypothetical studies of the same species (Q10 = 2) measured metabolic rate at different temperature differences. Their lnRRs differ three-fold, but their lnRR~Q10~ values are identical."
+#| fig-height: 3.4
+q10_demo <- tibble(temp = seq(15, 35, by = 0.5), rate = 1 * 2^((temp - 15) / 10))
+studies_q10 <- tibble(study = c("Study 1: 20 → 24 °C", "Study 2: 20 → 32 °C"),
+                      t1 = 20, t2 = c(24, 32)) |>
+  mutate(r1 = 2^((t1 - 15) / 10), r2 = 2^((t2 - 15) / 10),
+         lnRR = log(r2 / r1), lnRR_Q10 = 10 / (t2 - t1) * lnRR)
+
+ggplot(q10_demo, aes(temp, rate)) +
+  geom_line(colour = "grey50") +
+  geom_segment(data = studies_q10, aes(x = t1, xend = t2, y = r1, yend = r2, colour = study),
+               linewidth = 1.6) +
+  geom_point(data = studies_q10, aes(x = t2, y = r2, colour = study), size = 3) +
+  geom_text(data = studies_q10,
+            aes(x = t2 + 0.5, y = r2, colour = study,
+                label = sprintf("lnRR = %.2f\nlnRR_Q10 = %.2f", lnRR, lnRR_Q10)),
+            hjust = 0, size = 3.2, show.legend = FALSE) +
+  scale_colour_manual(values = unname(pal[c("blue", "red")]), name = NULL) +
+  xlim(15, 38) +
+  labs(x = "Temperature (°C)", y = "Metabolic rate (relative)")
+```
+
+### $lnRR_{Q_{10}}$: Diving vertebrates and climate change
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/rodgers_2021.png)
+
+We will demonstrate how to apply $lnRR_{Q_{10}}$ to a data set on diving vertebrates by @Rodgers2021. @Rodgers2021 already analysed $Q_{10}$, but at the time they did not have $lnRR_{Q_{10}}$, meaning it was not possible to analyse these data using meta-analytic models -- they resorted to meta-regression approaches with standard effect sizes, which are an equally valid alternative. Here, we will show you how to calculate $lnRR_{Q_{10}}$ and interpret it.
+
+We'll download the data set used to analyse $Q_{10}$ and load a bunch of packages that are necessary. 
+
+```{r}
+#| label: ln10
+#| message: false
+#| warning: false
+#| cache: true
+
+# Note: This downloads data from GitHub raw content
+q10_dat <- read.csv("https://raw.githubusercontent.com/essierodgers/diving-meta-analysis/master/data/contrast_lab_dataset.csv") 
+
+#install.packages("pacman")
+pacman::p_load(devtools, pander, tidyverse, metafor)
+```
+
+We'll now need a function for calculating $lnRR_{Q_{10}}$ because this effect size is not part of the `metafor` package. 
+
+```{r}
+#| label: ln10funcs
+#| message: false
+#| warning: false
+
+#' @title lnRR_Q10
+#' @description Calculates the log Q10 response ratio.  Note that temperature 2 is placed in the numerator and temperature 1 is in the denominator
+#' @param t1  Lowest of the two treatment temperatures
+#' @param t2  Highest of the two treatment temperatures
+#' @param r1  Mean physiological rate for temperature 1
+#' @param r2  Mean physiological rate for temperature 2
+#' @param sd1 Standard deviation for physiological rates at temperature 1
+#' @param sd2 Standard deviation for physiological rates at temperature 2
+#' @param n1  Sample size at temperature 1
+#' @param n2  Sample size at temperature 2
+#' @param name Character string for column name
+#' @example
+#' lnRR_Q10(20, 30, 10, 5, 1, 1, 30, 30)
+#' lnRR_Q10(20, 30, 10, 5, 1, 1, 30, 30, name = "acclim")
+#' @export
+
+lnRR_Q10 <- function(t1, t2, r1, r2, sd1, sd2, n1, n2, name ="acute"){
+        
+    lnRR_Q10 <- (10 / (t2 - t1))   * log(r2 / r1)
+  V_lnRR_Q10 <- (10 / (t2 - t1))^2 * ((sd1^2 / (n1*r1^2)) + (sd2^2 / (n2*r2^2)))
+  
+              dat <- data.frame(lnRR_Q10, V_lnRR_Q10)
+    colnames(dat) <- c(paste0("lnRR_Q10", name),  
+                       paste0("V_lnRR_Q10", name))
+  return(dat)
+}
+
+```
+
+### Calculating and Interpreting $lnRR_{Q_{10}}$
+We can now use the function above to calculate $lnRR_{Q_{10}}$. 
+
+```{r}
+#| label: ln10calc
+#| message: false
+#| warning: false
+
+library(tidyverse)
+
+# Calculate lnRRQ10 and it's associated sampling variance
+q10_dat <- cbind(q10_dat, with(q10_dat, lnRR_Q10(t1 = t1, t2 = t2, r1 = mean_t1, r2 = mean_t2, sd1 = sd_t1, sd2 = sd_t2, n1 = n_t1, n2 = n_t2, name = "")))
+head(q10_dat)
+
+# Now we can back-calculate to put on the original Q10 scale. We can than check that this matches the Q10 already in the data
+head(q10_dat %>% mutate(exp_lnRR_Q10 = exp(lnRR_Q10)) %>% select(exp_lnRR_Q10, Q10))
+
+```
+
+### **Now that we have our $lnRR_{Q_{10}}$ effect size estimates which we back-transformed how do we interpret them?**
+
+::: {.panel-tabset}
+
+# Task
+
+>**How do we interpret $lnRR_{Q_{10}}$?** 
+
+# Answer
+
+>Given these are simply $Q_{10}$'s we can interpret these normally. A value $<1$ means the physiological rate decreases with a 10$^{\circ}$C increase in temperature; a value $>1$ means it increases. **For the first row of our data, $Q_{10} \approx$ `r round(exp(q10_dat$lnRR_Q10[1]), 2)`, meaning dive duration at the higher temperature is about `r round(100*exp(q10_dat$lnRR_Q10[1]))`% of dive duration 10$^{\circ}$C lower -- i.e., a decrease of roughly `r round(100*(1 - exp(q10_dat$lnRR_Q10[1])))`% per 10$^{\circ}$C warming.**
+
+:::
+
+<br>
+
+## Acclimation Response Ratio, ARR
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/pottier.png)
+
+@Pottier2021 used the acclimation response ratio, ARR, to investigate variation in the relationship between acclimation temperature and thermal tolerance (i.e. variation in slope). Because heat tolerance is consistently measured in degrees Celsius (`CTmax`) in the studies compiled, the slope between acclimation temperature and heat tolerance can be calculated, which is termed as the acclimation response ratio (`ARR`) in the literature. It is defined as the difference in the trait mean between the higher and lower acclimation temperature, divided by the difference in acclimation temperature:
+
+$$
+\text{ARR} = \frac{M_{\text{high}} - M_{\text{low}}}{T_{\text{high}} - T_{\text{low}}},
+$$ {#eq-arr}
+where $M_{\text{high}}$ and $M_{\text{low}}$ are the mean trait values (e.g. `CTmax`) at the higher and lower acclimation temperatures, and $T_{\text{high}}$ and $T_{\text{low}}$ are those acclimation temperatures. Because $T_{\text{high}} > T_{\text{low}}$, the sign of ARR simply tracks the sign of $M_{\text{high}} - M_{\text{low}}$: a positive ARR means the trait *increases* with acclimation temperature.
+
+When the two groups are independent, the sampling variance for $ARR$ follows from applying the variance of a linear combination and dividing by the (fixed) squared temperature difference:
+
+$$
+\sigma^2_{ARR} = \left( \frac{1}{T_{\text{high}} - T_{\text{low}}} \right)^2
+\left( \frac{SD^2_{\text{high}}}{N_{\text{high}}} + \frac{SD^2_{\text{low}}}{N_{\text{low}}} \right)
+$$ {#eq-varr}
+
+In this example, we will use a simplified data set from @Pottier2021, and demonstrate how to investigate the mean effect of acclimation temperature on heat tolerance. This effect size is calculated as the difference between the heat tolerance at the higher (`mean_high`) and the lower (`mean_low`) acclimation temperatures, divided by the difference between acclimation temperatures (`acc_temp_high` - `acc_temp_low`). 
+
+### Download Data and Functions for $ARR$
+
+```{r}
+asr_dat <- read.csv("https://osf.io/qn2af/download")
+```
+
+We'll also need a function for calculating ARR and its sampling variance because these don't exist in any current packages.
+
+```{r ARRfunc}
+#' @title arr
+#' @description Calculates the acclimation response ratio (ARR) and its sampling variance.
+#' @param x1_h  Mean trait value at the higher acclimation temperature
+#' @param x2_l  Mean trait value at the lower acclimation temperature
+#' @param sd1_h Standard deviation of the trait at the higher acclimation temperature
+#' @param sd2_l Standard deviation of the trait at the lower acclimation temperature
+#' @param n1_h  Sample size at the higher acclimation temperature
+#' @param n2_l  Sample size at the lower acclimation temperature
+#' @param t1_h  Higher of the two acclimation temperatures
+#' @param t2_l  Lower of the two acclimation temperatures
+
+arr <- function(x1_h, x2_l, sd1_h, sd2_l, n1_h, n2_l, t1_h, t2_l){
+        ARR <- (x1_h - x2_l)/(t1_h - t2_l)
+      V_ARR <- ((1/(t1_h - t2_l))^2*(sd2_l^2/n2_l + sd1_h^2/n1_h))
+return(data.frame(ARR, V_ARR))
+}
+```
+
+
+### Calculating and Interpreting $ARR$
+Using the `arr` function above we can now calculate the acclimation response ratio (ARR)
+
+```{r}
+# Calculate the effect sizes
+asr_dat<-asr_dat %>% 
+              mutate(ARR= arr(x1_h = mean_high, x2_l = mean_low, t1_h = acc_temp_high, t2_l = acc_temp_low, 
+                              sd1_h = sd_high, sd2_l = sd_low, n1_h = n_high_adj, n2_l = n_low_adj)[,1], 
+                     V_ARR = arr(x1_h =  mean_high, x2_l = mean_low, t1_h = acc_temp_high, t2_l = acc_temp_low, 
+                              sd1_h = sd_high, sd2_l = sd_low, n1_h = n_high_adj, n2_l = n_low_adj)[,2])
+head(asr_dat %>% select(ARR, V_ARR))
+```
+
+### Now try to interpret $ARR$ effect size estimates
+
+::: {.panel-tabset}
+
+# Task
+
+>**How do we interpret $ARR$? for the first row of the data** 
+
+# Answer
+
+>If we look at the first row of data, **we can see that for each degree increase in acclimation temperature, the heat tolerance of the animals included in this data set increases by `r asr_dat[1,"ARR"]`$^{\circ}$C**. 
+
+:::
+
+:::
+
+---
+
+# Meta-analysis of variability: lnVR and lnCVR
+
+Treatments can change not only the mean but also the **spread** among individuals — e.g. stress may make some individuals respond strongly and others not at all. Two effect sizes compare variability between groups [@Nakagawa2015; @Senior2020]:
+
+$$
+\text{lnVR} = \ln\left(\frac{SD_T}{SD_C}\right) + \frac{1}{2(n_T - 1)} - \frac{1}{2(n_C - 1)}, \qquad
+v_{\text{lnVR}} = \frac{1}{2(n_T - 1)} + \frac{1}{2(n_C - 1)}
+$$
+
+$$
+\text{lnCVR} = \ln\left(\frac{CV_T}{CV_C}\right) + \text{bias corrections}, \qquad CV = SD / \bar{X}
+$$
+
+Because in biology **SD usually scales with the mean** (bigger animals or faster rates vary more in absolute terms), lnVR confounds changes in variability with changes in the mean. **lnCVR** compares *relative* variability, accounting for this mean–variance relationship.
+
+```{r}
+#| label: fig-meanvar
+#| echo: false
+#| fig-cap: "Left: log SD increases almost 1:1 with log mean across all groups in the core vs edge dataset — a strong mean–variance relationship. Right: two groups with the same CV (lnCVR = 0) but a 50% difference in SD (lnVR = 0.41) because their means differ."
+#| fig-height: 3.6
+mv <- ratio_data |>
+  select(mean_core, sd_core, mean_front, sd_front) |>
+  pivot_longer(everything(), names_to = c(".value", "group"), names_pattern = "(mean|sd)_(.*)") |>
+  filter(mean > 0, sd > 0)
+
+p_mv <- ggplot(mv, aes(log(mean), log(sd))) +
+  geom_point(alpha = 0.4, colour = pal["blue"]) +
+  geom_smooth(method = "lm", se = FALSE, colour = pal["red"]) +
+  labs(x = "ln(mean)", y = "ln(SD)", title = "Mean–variance relationship")
+
+p_cv <- tibble(x = seq(0, 30, 0.1)) |>
+  mutate(Control = dnorm(x, 10, 2), Treatment = dnorm(x, 15, 3)) |>
+  pivot_longer(-x, names_to = "group", values_to = "density") |>
+  ggplot(aes(x, density, fill = group)) +
+  geom_area(alpha = 0.55, position = "identity", colour = "grey30", linewidth = 0.3) +
+  scale_fill_manual(values = unname(pal[c("sky", "red")]), name = NULL) +
+  labs(x = "Trait", y = NULL, title = "Same CV, different SD")
+
+p_mv + p_cv
+```
+
+```{r}
+#| label: variability-calc
+core_edge_var <- ratio_data |>
+  filter(mean_front > 0, mean_core > 0) |>
+  escalc(measure = "VR",  sd1i = sd_front, n1i = n_front, sd2i = sd_core, n2i = n_core,
+         data = _, var.names = c("lnVR", "v_lnVR")) |>
+  escalc(measure = "CVR", m1i = mean_front, sd1i = sd_front, n1i = n_front,
+                          m2i = mean_core,  sd2i = sd_core,  n2i = n_core,
+         data = _, var.names = c("lnCVR", "v_lnCVR"))
+
+core_edge_var |>
+  as_tibble() |>
+  select(species, response, lnVR, v_lnVR, lnCVR, v_lnCVR) |>
+  head(5)
+```
+
+**Interpretation.** lnCVR > 0 means the edge population is *relatively* more variable than the core. We model these effect sizes on Day 3 ([Meta-analysis of variability](../day3/3-3-variability-location-scale.qmd)).
+
+
+# SD, SE, sampling variance, precision and weights
+
+These terms are easily confused:
+
+| Quantity | Describes | Formula |
+|---|---|---|
+| Standard deviation (SD) | spread of **individuals** within a group | from raw data |
+| Standard error (SE) of a mean | uncertainty in a group **mean** | $SD / \sqrt{n}$ |
+| Sampling variance $v_i$ | uncertainty in an **effect size** | e.g. $1/(n-3)$ for *Zr* |
+| Standard error of an effect size | same, on the SD scale | $\sqrt{v_i}$ |
+| Precision | inverse of uncertainty | $1/\sqrt{v_i}$ |
+| Weight (fixed-effect) | contribution to the meta-analytic mean | $w_i = 1/v_i$ |
+| Weight (random-effects) | as above, plus between-study variance | $w_i = 1/(v_i + \tau^2)$ (Day 2) |
+
+It is important to note that sampling variance, (sampling) standard error, precision and weight are often used interchangeably in the meta-analytic literature to refer to (un)certainty of a point estimate (see below). For example, a point estimate with high certainty has low ‘standard error’ and ‘variance’, but high ‘precision’ and ‘weight’ [@Nakagawa2021b].
+
+![A schematic showing the relationship among common terminology in the meta-analytic literature: standard error (SE), sampling variance, precision (the inverse of SE) and weight (the inverse of variance). Note that the inverse of variance is the weight for a fixed-effect model (the weight for a random-effect model is the inverse of the sum of sampling variance and between-study variance). In the statistical literature, the inverse of variance is also referred to as precision. Importantly, ‘standard error’ (SE) can be referred to as ‘standard deviation’ (SD), which is not incorrect because standard error is ‘standard deviation of a statistic’—not to be confounded with ‘standard deviation of a sample’](https://besjournals.onlinelibrary.wiley.com/cms/asset/e0b0268e-4460-467f-8efa-43f5b7e617e2/mee313724-fig-0001-m.jpg)
+
+```{r}
+#| label: fig-se-n
+#| echo: false
+#| fig-cap: "Sampling standard error of three effect sizes as a function of sample size (per group for SMD and lnRR). Uncertainty falls with the square root of n: quadrupling sample size halves the SE. For lnRR, the SE also depends on the coefficient of variation (CV = 0.3 here)."
+#| fig-height: 3.6
+tibble(n = 5:100) |>
+  mutate(`Zr`  = sqrt(1 / (n - 3)),
+         `SMD (g = 0.5)` = sqrt((2 * n) / (n^2) + 0.5^2 / (2 * 2 * n)),
+         `lnRR (CV = 0.3)` = sqrt(2 * 0.3^2 / n)) |>
+  pivot_longer(-n, names_to = "effect_size", values_to = "se") |>
+  ggplot(aes(n, se, colour = effect_size)) +
+  geom_line(linewidth = 1.1) +
+  labs(x = "Sample size (n)", y = "Standard error of effect size")
+```
+
+
+# Writing it up
+
+Your methods must state the effect size, its direction, its sampling variance, and any corrections:
+
+::: {.writeup}
+We quantified the effect of warming on dive duration as the temperature-standardised log response ratio, lnRR~Q10~ [@Noble2022], with the higher temperature in the numerator, so that negative values indicate shorter dives at warmer temperatures. Sampling variances were calculated following Noble et al. [-@Noble2022]. Where studies reported standard errors or 95% confidence intervals, these were converted to standard deviations before calculating effect sizes. For interpretation, meta-analytic estimates were back-transformed to Q~10~ (exp[lnRR~Q10~]).
+:::
+
+# References
+
+<div id="refs"></div>
+
+<br>

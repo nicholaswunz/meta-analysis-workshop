@@ -1,0 +1,352 @@
+---
+title: "Multilevel meta-regression"
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(metafor)
+library(orchaRd)
+library(ape)
+source(here::here("R", "theme_workshop.R"))
+```
+
+# From "how big?" to "why does it vary?"
+
+Meta-analysis often reveals substantial heterogeneity among effect estimates included in the analysis [@Senior2016]. While many meta-analysts are interested in 'overall mean effects', we need to couch these effects in context by reporting on their variability and work hard to understand what factors drive effect variability and why [@Noble2022; @Lag2010]. For meta-analyses in comparative physiology, explaining variation in effects should probably be the main goal of every analysis. Sampling variance often explains only a small amount of the total heterogeneity, so it's important that we think hard, *a priori*, about what factors are likely to explain effect size variation. 
+
+As already indicated, some variation in effects could be explained by [nuisance heterogeneity](2-2-heterogeneity.qmd), which may or may not be of interest. Other sources of variability could be methodological [@Noble2022]. Do different chemicals that result in oxidative stress induce stronger or weaker responses? Understanding how methodological choices impact upon effect sizes can change how research is done in a field. 
+
+While methodological moderators are important, biological variables are usually our main interest. We might be interested in understanding how much variation among species exists or how different life-histories, body sizes, ecological niches, feeding habits or thermal strategies (e.g., ectotherms vs endotherms) differ in their response to some treatment or the association between two variables. 
+
+Exploring population-level / average changes in effect size magnitude (and direction) as a function of 'moderators' (what are typically called predictors or fixed effects in other literature) is a critical aspect of meta-analysis in ecology and evolution. The models used to test how average effects change as some function of a moderator are called meta-regression. 
+
+We can extend our multi-level meta-analytic model, which only has an intercept, to include moderators quite easily: 
+
+$$
+\begin{aligned}
+y_{i} &= \mu + \sum_{i = 1}^{N_{m}}\beta_{m}x_{m} +  s_{j[i]} + sp_{k[i]} + e_{i} + m_{i} \\
+m_{i} &\sim N(0, v_{i}) \\
+s_{j} &\sim N(0, \tau^2) \\
+s_{k} &\sim N(0, \sigma_{k}^2) \\
+e_{i} &\sim N(0, \sigma_{e}^2)
+\end{aligned}
+$$
+
+Here, $\beta_{m}$ is the slope (or contrast) for the *m th* moderator (where m = 1, ..., $N_{moderator}$ or $N_{m}$). We can include different types of continuous and categorical moderators in our model. Some of these moderators might control for [nuisance heterogeneity](1-3-effect-sizes.qmd), others might be to understand how different experimental designs affect the magnitude and direction of mean effect size and some may simply be biological in nature -- they might compare ectotherms to endotherms, for example.  
+
+| Moderator type | Example in comparative physiology | Coefficient means |
+|---|---|---|
+| Categorical | sex, taxon, respiration mode, lab vs field | difference from the reference level |
+| Continuous | body mass, latitude, temperature, year | change in effect size per unit of *x* |
+
+Biological moderators (sex, body size, thermal strategy) test hypotheses. **Methodological** moderators (exposure duration, measurement method) control for nuisance heterogeneity [@Noble2022].
+
+::: {.callout-warning}
+## Moderators are correlational
+Moderators in a meta-analysis are not experimentally assigned. If larger species were also studied mainly in the field, a "body-size" effect could be a "field" effect. Look at how moderators covary before interpreting them, and keep models simple relative to the number of studies (a rough guide: ≥ 10 studies per moderator level or slope).
+:::
+
+
+# Phylogenetic multi-level meta-regression
+
+Here, we will illustrate two examples using Phylogenetic multi-level meta-regression.
+
+::: {.panel-tabset}
+
+# Physiology and activity, exploration and disperal
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/WuSeebacher.png)
+
+We'll turn again to the study by @WuSeebacher2022. We can run the same phylogenetic meta-analysis that we did in the [Phylogenetic meta-analytic models tutorial](2-3-non-independence.qmd), but this time we can include moderators or predictors that we think will explain some variation in effects. From the original study aim, the first thing @WuSeebacher2022 were interested in is the relationship of physiology with activity, exploration and dispersal (Zr). In addition to the random effects  --  `es_ID` (effect size identity), `study_ID`(unique study identity), `species`(unique species identity), and `species_OTL`(phylogenetic relatedness), they were also interested in comparing whether the correlation (or Zr) differs depending on whether the behavioural trait of interest was activity, exploration or dispersal. As such, a phylogenetic meta-regression model was fit with a moderator `disp_trait` (activity, exploration, or dispersal) to explicitly test whether Zr varied across these effect types.
+
+## Load data and phylogeny
+
+We'll start again by loading the raw data and reconstructing the phylogenetic tree, which will be used to control for shared evolutionary history. The other random effects are already in the dataset.
+
+```{r}
+#| label: raw-data
+#| message: false
+#| warning: false
+#| output: false
+
+# Load packages
+pacman::p_load(rotl, ape, tidyverse, devtools, R.rsp)
+
+# Download the orchaRd package
+devtools::install_github("daniel1noble/orchaRd", force = TRUE, build_vignettes = TRUE)
+library(orchaRd)
+
+zr_data <- read.csv("https://raw.githubusercontent.com/daniel1noble/meta-workshop/gh-pages/data/ind_disp_raw_data.csv") %>%
+  dplyr::select(-dispersal_def) %>% # remove irrelevant columns
+  tibble::rowid_to_column("es_ID") %>% # add effect size ID
+  dplyr::mutate(species_OTL = stringr::str_replace_all(species_OTL, "_", " ")) # remove underscore for some species with missing underscore. Some inconsistency when curating the database.
+
+# Calculate Zr and sampling variance
+zr_data <- metafor::escalc(measure = "ZCOR", ri = corr_coeff, ni = sample_size, data = zr_data, var.names = c("Zr", "V_Zr"))
+
+# Create species list based on OTL names and match with OTL database
+species <- sort(unique(as.character(zr_data$species_OTL))) # generate list of species (as character format)
+taxa    <- rotl::tnrs_match_names(names = species) # match taxonomic names to the OTL
+
+# Retrieving phylogenetic relationships among taxa in the form of a trimmed sub-tree
+tree <- rotl::tol_induced_subtree(ott_ids = ott_id(taxa), label_format = "name")
+
+set.seed(1) 
+tree <- ape::compute.brlen(tree, method = "Grafen", power = 1) # compute branch lengths
+tree <- ape::multi2di(tree, random = TRUE) # use a randomization approach to deal with polytomies
+
+# Create correlation matrix for analysis
+phylo_cor <- vcv(tree, cor = T)
+```
+
+## Fit the Phylogenetic Meta-regression Model
+
+We can now fit our multi-level meta-regression model including the `disp_trait` moderator:
+
+**Note**: Remember to add an underscore to the species OTL because the tree tip names have underscores and these need to match exactly.
+
+```{r}
+#| label: analysis
+#| echo: true
+
+overall_model <- metafor::rma.mv(yi = Zr, V = V_Zr, 
+                                        mod    = ~ -1 + disp_trait, 
+                                        random = list(~1 | study_ID, ~1 | es_ID, ~1 | species, ~1 | species_OTL),
+                                        R      = list(species_OTL = phylo_cor),
+                                        method = "REML", test = "t", dfs = "contain",
+                                        data   = zr_data %>%
+                                   dplyr::mutate(species_OTL = stringr::str_replace_all(species_OTL, " ", "_")))
+summary(overall_model)
+```
+
+### What does the model output tell us?
+
+::: {.panel-tabset}
+
+## Task
+
+>Is there a relationship between physiology and activity, exploration, or dispersal?
+
+## Answer
+
+>We can see from above that the model estimates **a positive relationship** between physiology and activity with **an overall mean of `r overall_model$b[1,]` with a 95% confidence interval (95% CI) of `r overall_model$ci.lb[1]` to `r overall_model$ci.ub[1]`**. Exploration and dispersal were also, on average, positively associated with physiology, but exploration had a higher level of uncertainty (Exploration = `r overall_model$b[3,]` [95% CI `r overall_model$ci.lb[3]`, `r overall_model$ci.ub[3]`], Dispersal = `r overall_model$b[2,]`, [95% CI `r overall_model$ci.lb[2]`, `r overall_model$ci.ub[2]`]). Heterogeneity remained high in this analysis based on the Q-test. 
+
+:::
+
+<br>
+
+## Contrasts between trait levels
+
+You might have noticed that we suppressed the intercept in this model (i.e., `-1`). This is very typical in meta-analysis because we are interested in the overall mean effect size in each of the three levels of the moderator. However, **you may instead want to explicitly compare whether there are significant differences in *Zr* between categories**. To estimate these contrasts you can add the intercept back into the model and the resulting parameters are now contrasts between the intercept (in this case `Activity`) and `Dispersal` and `Exploration`.
+
+```{r}
+#| label: analysis2
+#| echo: true
+
+overall_model <- metafor::rma.mv(yi = Zr, V = V_Zr, 
+                                        mod    = ~ disp_trait, 
+                                        random = list(~1 | study_ID, ~1 | es_ID, ~1 | species, ~1 | species_OTL),
+                                        R      = list(species_OTL = phylo_cor),
+                                        method = "REML", test = "t", dfs = "contain",
+                                        data   = zr_data %>%
+                                   dplyr::mutate(species_OTL = stringr::str_replace_all(species_OTL, " ", "_")))
+summary(overall_model)
+```
+
+### What does the model output tell us?
+
+We can see that the model coefficients have changed. The `intrcpt` now takes on the mean *Zr* for `Activity`. In other words, this is the mean *Zr* for the correlations between physiology and activity. As such, this is the same value as the previous model. 
+
+For the `intrcpt`, the null hypothesis being tested is whether the mean differs significantly from zero, which it does. In contrast, `disp_traitDispersal` and `disp_traitExploration` are no longer meta-analytic means for `Dispersal` and `Exploration` as in the previous model. Rather, they are now contrasts, or differences, between the mean *Zr* for `Activity` and the mean *Zr* for `Dispersal` and `Exploration`. They are now testing the null hypothesis that the difference between *Activity and Dispersal* (i.e., `disp_traitDispersal`) and *Activity and Exploration* (i.e., `disp_traitExploration`) are different from zero.
+
+::: {.panel-tabset}
+
+## Task
+
+>Does the mean *Zr* for Exploration and Dispersal differ from Activity?
+
+## Answer
+
+>We can see that the mean Z-transformed correlation (*Zr*) between physiology and activity **does not differ significantly** from *Zr* between *Activity and Dispersal* and *Activity and Exploration*. The model also explains only `r orchaRd::r2_ml(overall_model)[1]`% ($R_{marginal}^2$) of the variation, so we can be confident that there is little predictive power from this moderator. 
+
+<br>
+
+>We can also visually depict the differences in *r* between these groups using an orchard plot [@Nakagawa2021c] after back-transforming from *Zr*: 
+
+:::
+
+<br>
+
+```{r}
+#| label: orchard
+#| echo: true
+#| fig-align: center
+#| fig-cap: "Orchard plot of mean correlation coefficient between physiology and activity, dispersal and exploration. k indicates the number of effect sizes (studies in brackets). Thick black bars are 95% confidence intervals and the thin (`twigs`) are 95% prediction intervals"
+
+orchaRd::orchard_plot(overall_model, group = "study_ID", mod = "disp_trait", xlab = "Correlation Coefficient (r)", transfm = "tanh", angle = 45)
+```
+
+
+<br>
+
+
+# Why does warming shorten dives more in some species?
+
+![](https://raw.githubusercontent.com/daniel1noble/meta-analysis_workshop/refs/heads/main/figs/rodgers_2021.png)
+
+
+We build a phylogenetic model of dive duration (lnRR~Q10~) from Rodgers et al.'s [-@Rodgers2021] data on dive duration of ectothermic vertebrates at two temperatures. In several studies, more than one warm treatment was compared against the **same** cooler control temperature. Because lnRR~Q10~ multiplies lnRR by $s = 10/(T_2 - T_1)$, the covariance between two effects $i$ and $j$ sharing a control is $s_i s_j \, SD_C^2 / (n_C \bar X_C^2)$. Two biologically motivated moderators [@Rodgers2021]:
+
+- **Respiration mode**: *bimodal* breathers (which can take up O~2~ underwater through the skin or cloaca) vs *aerial* breathers.
+- **Body mass**: larger animals have larger O~2~ stores relative to their mass-specific metabolic rate.
+
+```{r}
+#| label: data
+
+# lnRR_Q10 and its sampling variance
+lnRR_Q10 <- function(t1, t2, r1, r2, sd1, sd2, n1, n2) {
+  s <- 10 / (t2 - t1)
+  tibble(yi = s * log(r2 / r1), vi = s^2 * (sd1^2 / (n1 * r1^2) + sd2^2 / (n2 * r2^2)))
+}
+
+# Download data and calculate lnRR_Q10
+dive <- read_csv(here::here("data", "rodgers_2021_diving_lab.csv")) |>
+  mutate(species  = str_trim(species) |> str_replace_all(" ", "_") |>
+                    str_replace("Trachemys_scripta_elegans", "Trachemys_scripta"),
+         phylo    = species,
+         es_ID    = row_number(),
+         study_ID = factor(study_ID),
+         control_ID = paste(study_ID, shared_control, t1, mean_t1, sd_t1, n_t1, sep = "_"),
+         lnRR_Q10(t1, t2, mean_t1, mean_t2, sd_t1, sd_t2, n_t1, n_t2),
+         scale_q10 = 10 / (t2 - t1),
+         cov_c     = sd_t1^2 / (n_t1 * mean_t1^2),
+         log_mass  = log10(body_mass),
+         log_mass_c = log_mass - mean(log_mass))   # centred: intercept = average-sized animal
+
+# V matrix for shared controls and phylogenetic correlation matrix
+
+# Another way to build a co-varaince matrix for shared controls 
+k <- nrow(dive)
+V_dive <- with(dive, outer(1:k, 1:k, function(i, j)
+  if_else(control_ID[i] == control_ID[j], scale_q10[i] * scale_q10[j] * cov_c[i], 0)))
+diag(V_dive) <- dive$vi
+
+
+# Load phylogeny tree and match with dive dataset
+tree <- read.tree(here::here("data", "rodgers_2021_diving_lab_tree.nwk")) |>
+  keep.tip(unique(dive$species))
+A <- vcv(tree, corr = TRUE)
+
+rand <- list(~ 1 | study_ID, ~ 1 | es_ID, ~ 1 | species, ~ 1 | phylo)  # reused below
+```
+
+Always look at the moderators first:
+
+```{r}
+#| label: explore
+dive |> count(respiration_mode, order)
+```
+
+## A categorical moderator - Respiration mode
+
+```{r}
+#| label: mr-resp
+mr_resp <- rma.mv(yi, V_dive,
+                  mods   = ~ respiration_mode,   # reference level = "aerial" (alphabetical)
+                  random = rand, R = list(phylo = A),
+                  test = "t", dfs = "contain", sparse = TRUE, data = dive)
+mr_resp
+```
+
+## Interpreting the output
+
+- `Test of Moderators (coefficient 2)` — the **omnibus test** (an *F*-test because `test = "t"`) of whether the moderator explains significant heterogeneity.
+- `intrcpt` — the mean for the **reference level** (`aerial`).
+- `respiration_modebimodal` — the **difference** between bimodal and aerial breathers (a contrast, not the bimodal mean!).
+- `Test for Residual Heterogeneity (QE)` — heterogeneity left after accounting for the moderator.
+
+To get the **mean of each group** directly, remove the intercept (`- 1`) or use `orchaRd::mod_results()`:
+
+```{r}
+#| label: group-means
+mr_resp_means <- update(mr_resp, mods = ~ respiration_mode - 1)
+coef(summary(mr_resp_means)) |> as_tibble(rownames = "group") |>
+  mutate(Q10 = exp(estimate))
+
+res_resp <- mod_results(mr_resp, mod = "respiration_mode", group = "study_ID")
+res_resp$mod_table
+```
+
+::: {.callout-note}
+## Don't use the intercept-free model for the QM test
+With `- 1` the omnibus test asks "are *all* group means zero?", not "do groups *differ*?". Use the model with an intercept for testing differences, and the intercept-free model (or `mod_results()`) for reporting group means.
+:::
+
+```{r}
+#| label: fig-orchard-resp
+#| fig-cap: "Orchard plot by respiration mode: group means (circles) with 95% CIs (thick bars) and prediction intervals (thin bars), effect sizes scaled by precision."
+#| fig-height: 4
+orchard_plot(mr_resp, mod = "respiration_mode", group = "study_ID",
+             xlab = "lnRR_Q10 (dive duration)")
+```
+
+## A continuous moderator - Mass
+
+```{r}
+#| label: mr-mass
+mr_mass <- rma.mv(yi, V_dive, mods = ~ log_mass_c,
+                  random = rand, R = list(phylo = A),
+                  test = "t", dfs = "contain", sparse = TRUE, data = dive)
+mr_mass
+```
+
+The slope is the change in lnRR~Q10~ per 10-fold increase in body mass (because we used log~10~). The intercept is the expected effect for an animal of average log body mass (because we **centred** the moderator).
+
+```{r}
+#| label: fig-bubble
+#| fig-cap: "Bubble plot of lnRR_Q10 against log10 body mass. Bubble size is precision; the line is the meta-regression slope with its 95% CI (dashed) and prediction interval (dotted)."
+#| fig-height: 3
+bubble_plot(mr_mass, mod = "log_mass_c", group = "study_ID",
+            xlab = "log10 body mass (g), centred", ylab = "lnRR_Q10", legend.pos = "top.left")
+```
+
+## Several moderators and R²
+
+```{r}
+#| label: mr-both
+mr_both <- rma.mv(yi, V_dive, mods = ~ respiration_mode + log_mass_c,
+                  random = rand, R = list(phylo = A),
+                  test = "t", dfs = "contain", sparse = TRUE, data = dive)
+summary(mr_both)
+
+# Marginal R2: variance explained by moderators; conditional R2: moderators + random effects
+r2_ml(mr_both)
+```
+
+Marginal R² [@NakagawaSchielzeth2013] is the proportion of total variance (excluding sampling variance) explained by the fixed effects.
+
+::: {.callout-tip}
+## Comparing models
+To compare models with **different fixed effects** by AIC or likelihood-ratio test, refit them with `method = "ML"`:
+
+```{r}
+#| label: anova-ml
+anova(update(mr_both, method = "ML"), update(mr_resp, method = "ML"))
+```
+:::
+
+:::
+
+# Writing it up
+
+::: {.writeup}
+Respiration mode `r if (mr_resp$QMp < 0.05) "explained" else "did not explain"` a significant amount of heterogeneity (*F*~`r mr_resp$QMdf[1]`,`r mr_resp$QMdf[2]`~ = `r sprintf("%.2f", mr_resp$QM)`, *p* `r fmt_p(mr_resp$QMp)`). The mean Q~10~ for dive duration was `r sprintf("%.2f", exp(res_resp$mod_table$estimate[1]))` (95% CI `r sprintf("%.2f", exp(res_resp$mod_table$lowerCL[1]))`–`r sprintf("%.2f", exp(res_resp$mod_table$upperCL[1]))`) in aerial breathers and `r sprintf("%.2f", exp(res_resp$mod_table$estimate[2]))` (`r sprintf("%.2f", exp(res_resp$mod_table$lowerCL[2]))`–`r sprintf("%.2f", exp(res_resp$mod_table$upperCL[2]))`) in bimodal breathers. Body mass `r if (mr_mass$pval[2] < 0.05) "was" else "was not"` related to the thermal sensitivity of dive duration (slope = `r sprintf("%.3f", mr_mass$b[2])` per log~10~ g, 95% CI `r sprintf("%.3f", mr_mass$ci.lb[2])` to `r sprintf("%.3f", mr_mass$ci.ub[2])`). Together, the two moderators explained `r sprintf("%.0f", 100 * r2_ml(mr_both)[1])`% of the heterogeneity in effect sizes (marginal *R*²).
+:::
+
+# References
+
+<div id="refs"></div>
+
+<br>
+

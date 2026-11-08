@@ -19,7 +19,7 @@ This series of workshops will teach you the workflow of conducting a meta-analyt
 
 The workshop is designed for **graduate students and comparative physiologists** who are comfortable with R and familiar with `tidyverse` syntax. We expect that students know how to load data (e.g., .csv files) into R, and how to check and tidy raw data. Real ecological data will be messy and full of errors that require cleaning, tidying and transforming before effect size calculations and meta-analysis can be performed. 
 
-If you need a refresher on this, I have a separate workshop that goes into the details of checking data quality and tidying data for analysis: [ECS200 – Research Methods in Ecology](https://nicholaswu.quarto.pub/ecs200/).
+If you need a refresher on this, I have a separate workshop that goes into the details of checking data quality and tidying data for analysis: [ECS200 – Research Methods in Ecology](https://nicholaswunz.github.io/ecs200/).
 
 >All statistical techniques have in common the problem of ‘*rubbish in, rubbish out*’
 
